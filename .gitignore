@@ -29,3 +29,14 @@ FACTURAS_RECONSTRUIDAS_ELOGIA/
 # Windows
 Thumbs.db
 desktop.ini
+
+# Node / TS monorepo
+node_modules/
+frontend/dist/
+backend/dist/
+shared/dist/
+.env
+.env.local
+*.tsbuildinfo
+.vercel/
+
