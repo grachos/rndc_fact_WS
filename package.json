@@ -1,6 +1,7 @@
 {
   "name": "fe-tool",
   "private": true,
+  "type": "module",
   "workspaces": [
     "frontend",
     "backend",
