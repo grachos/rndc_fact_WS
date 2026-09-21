@@ -22,7 +22,7 @@ function descargarCsv(filas: CargaRndcReporte[]) {
     "Archivo",
     "N° Factura",
     "Estado",
-    "Mensaje",
+    "Respuesta WS (RNDC)",
     "Remesas",
   ];
   const lineas = [
@@ -96,6 +96,18 @@ export function ReporteCargas() {
     const fallidas = total - exitosas;
     const tasa = total > 0 ? Math.round((exitosas / total) * 100) : 0;
     return { total, exitosas, fallidas, tasa };
+  }, [filas]);
+
+  const porUsuario = useMemo(() => {
+    const mapa = new Map<string, { usuario: string; total: number; exitosas: number; fallidas: number }>();
+    for (const f of filas) {
+      const entry = mapa.get(f.usuarioEmail) ?? { usuario: f.usuarioEmail, total: 0, exitosas: 0, fallidas: 0 };
+      entry.total += 1;
+      if (f.exito) entry.exitosas += 1;
+      else entry.fallidas += 1;
+      mapa.set(f.usuarioEmail, entry);
+    }
+    return [...mapa.values()].sort((a, b) => b.total - a.total);
   }, [filas]);
 
   return (
@@ -195,6 +207,41 @@ export function ReporteCargas() {
       </section>
 
       <section className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <h3 className="border-b border-slate-100 px-4 py-2 text-sm font-semibold text-slate-600">
+          Actividad por usuario
+        </h3>
+        <table className="w-full text-left text-sm">
+          <thead className="bg-slate-50 text-slate-500">
+            <tr>
+              <th className="px-3 py-2">Usuario</th>
+              <th className="px-3 py-2">Facturas cargadas</th>
+              <th className="px-3 py-2">Exitosas</th>
+              <th className="px-3 py-2">Fallidas</th>
+              <th className="px-3 py-2">Tasa de éxito</th>
+            </tr>
+          </thead>
+          <tbody>
+            {porUsuario.map((u) => (
+              <tr key={u.usuario} className="border-t border-slate-100">
+                <td className="px-3 py-2 font-medium text-slate-800">{u.usuario}</td>
+                <td className="px-3 py-2">{u.total}</td>
+                <td className="px-3 py-2 text-green-700">{u.exitosas}</td>
+                <td className="px-3 py-2 text-red-700">{u.fallidas}</td>
+                <td className="px-3 py-2">{u.total > 0 ? Math.round((u.exitosas / u.total) * 100) : 0}%</td>
+              </tr>
+            ))}
+            {porUsuario.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-3 py-4 text-center text-slate-400">
+                  Sin actividad para estos filtros.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </section>
+
+      <section className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
         <table className="w-full text-left text-sm">
           <thead className="bg-slate-50 text-slate-500">
             <tr>
@@ -204,7 +251,7 @@ export function ReporteCargas() {
               <th className="px-3 py-2">Archivo</th>
               <th className="px-3 py-2">N° Factura</th>
               <th className="px-3 py-2">Estado</th>
-              <th className="px-3 py-2">Mensaje</th>
+              <th className="px-3 py-2">Respuesta WS (RNDC)</th>
               <th className="px-3 py-2">Remesas</th>
             </tr>
           </thead>
