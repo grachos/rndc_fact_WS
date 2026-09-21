@@ -62,13 +62,16 @@ export function App() {
           }
         />
 
-        {allModules.map((m) => (
-          <Route
-            key={m.path}
-            path={m.path}
-            element={facturacionPages[m.path] ?? <ModulePlaceholder label={m.label} />}
-          />
-        ))}
+        {allModules.map((m) => {
+          const page = facturacionPages[m.path] ?? <ModulePlaceholder label={m.label} />;
+          return (
+            <Route
+              key={m.path}
+              path={m.path}
+              element={m.adminOnly ? <ProtectedRoute adminOnly>{page}</ProtectedRoute> : page}
+            />
+          );
+        })}
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

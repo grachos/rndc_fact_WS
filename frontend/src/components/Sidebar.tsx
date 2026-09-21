@@ -61,7 +61,9 @@ export function Sidebar() {
               </button>
               {isOpen && (
                 <div className="ml-2 space-y-0.5 border-l border-slate-100 pl-2">
-                  {group.modules.map((m) => (
+                  {group.modules
+                    .filter((m) => !m.adminOnly || user?.role === "admin")
+                    .map((m) => (
                     <NavLink
                       key={m.path}
                       to={m.path}

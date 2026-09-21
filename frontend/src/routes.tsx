@@ -28,6 +28,8 @@ export interface ModuleRoute {
   icon: LucideIcon;
   /** Placeholder pages render "próximamente" until their phase is built. */
   placeholder?: boolean;
+  /** Hidden from non-admins in the sidebar, and the route itself redirects them away. */
+  adminOnly?: boolean;
 }
 
 export interface ModuleGroup {
@@ -46,7 +48,7 @@ export const moduleGroups: ModuleGroup[] = [
       { path: "/facturacion/cargar-rndc", label: "Cargar facturas a RNDC", icon: UploadCloud },
       { path: "/facturacion/consultar-factura", label: "Consultar factura", icon: Search },
       { path: "/facturacion/consultar-factura-remesa", label: "Consultar factura por remesa", icon: Link2 },
-      { path: "/facturacion/reporte-cargas", label: "Reporte de cargas RNDC", icon: BarChart3 },
+      { path: "/facturacion/reporte-cargas", label: "Reporte de cargas RNDC", icon: BarChart3, adminOnly: true },
     ],
   },
   {

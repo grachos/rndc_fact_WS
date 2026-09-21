@@ -5,6 +5,7 @@ import * as XLSX from "xlsx";
 import { generarXmlInputSchema } from "@fe-tool/shared";
 import { getPerfilCredenciales, getPerfilXmlTemplate } from "../db/queries/perfiles.queries.js";
 import { requireAuth } from "../middleware/auth.js";
+import { requireRole } from "../middleware/requireRole.js";
 import { generarFacturaConTemplate, generarFacturaDesdeTemplate, SinPlantillaError } from "../services/xml/generarFactura.js";
 import {
   consultarFactura,
@@ -207,7 +208,7 @@ facturacionRouter.post("/cargar-rndc/enviar", upload.array("archivos"), async (r
 
 // ── Reporte de cargas RNDC ───────────────────────────────────────────────────
 
-facturacionRouter.get("/reporte-cargas", async (req, res) => {
+facturacionRouter.get("/reporte-cargas", requireRole("admin"), async (req, res) => {
   const perfilId = req.query.perfilId ? Number(req.query.perfilId) : undefined;
   const exito =
     req.query.exito === "true" ? true : req.query.exito === "false" ? false : undefined;
