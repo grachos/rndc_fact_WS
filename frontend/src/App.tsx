@@ -11,6 +11,7 @@ import { GenerarExcel } from "./pages/facturacion/GenerarExcel";
 import { CargarRndc } from "./pages/facturacion/CargarRndc";
 import { ConsultarFactura } from "./pages/facturacion/ConsultarFactura";
 import { ConsultarFacturaPorRemesa } from "./pages/facturacion/ConsultarFacturaPorRemesa";
+import { ReporteCargas } from "./pages/facturacion/ReporteCargas";
 import { allModules } from "./routes";
 
 const facturacionPages: Record<string, JSX.Element> = {
@@ -19,6 +20,7 @@ const facturacionPages: Record<string, JSX.Element> = {
   "/facturacion/cargar-rndc": <CargarRndc />,
   "/facturacion/consultar-factura": <ConsultarFactura />,
   "/facturacion/consultar-factura-remesa": <ConsultarFacturaPorRemesa />,
+  "/facturacion/reporte-cargas": <ReporteCargas />,
 };
 
 export function App() {

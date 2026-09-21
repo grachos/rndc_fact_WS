@@ -49,3 +49,20 @@ export const cargarRndcResultadoSchema = z.object({
   remesas: z.array(cargarRndcResultadoRemesaSchema),
 });
 export type CargarRndcResultado = z.infer<typeof cargarRndcResultadoSchema>;
+
+/** One row of the "Reporte de cargas RNDC" — a persisted record of a past
+ * `/cargar-rndc/enviar` upload attempt, for the interactive report + CSV export. */
+export const cargaRndcReporteSchema = z.object({
+  id: z.number().int(),
+  perfilId: z.number().int(),
+  perfilNombre: z.string(),
+  usuarioId: z.number().int(),
+  usuarioEmail: z.string(),
+  archivo: z.string(),
+  numeroFactura: z.string(),
+  exito: z.boolean(),
+  mensaje: z.string(),
+  remesas: z.number().int(),
+  createdAt: z.string(),
+});
+export type CargaRndcReporte = z.infer<typeof cargaRndcReporteSchema>;

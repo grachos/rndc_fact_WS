@@ -19,6 +19,7 @@ import {
   Wrench,
   FileScan,
   GitCompare,
+  BarChart3,
 } from "lucide-react";
 
 export interface ModuleRoute {
@@ -45,6 +46,7 @@ export const moduleGroups: ModuleGroup[] = [
       { path: "/facturacion/cargar-rndc", label: "Cargar facturas a RNDC", icon: UploadCloud },
       { path: "/facturacion/consultar-factura", label: "Consultar factura", icon: Search },
       { path: "/facturacion/consultar-factura-remesa", label: "Consultar factura por remesa", icon: Link2 },
+      { path: "/facturacion/reporte-cargas", label: "Reporte de cargas RNDC", icon: BarChart3 },
     ],
   },
   {

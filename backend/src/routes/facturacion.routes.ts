@@ -15,6 +15,7 @@ import {
 import { consultarRadicadoRemesa } from "../services/rndc/remesas.js";
 import { enviarFacturaRndc, parseFacturaXml } from "../services/rndc86/upload.js";
 import { autoMapear, parsearFacturas, validar, type Mapping, type FiltroGen } from "../services/excel/batchGenerar.js";
+import { insertCarga, listCargas } from "../db/queries/cargas.queries.js";
 
 export const facturacionRouter = Router();
 facturacionRouter.use(requireAuth);
@@ -191,8 +192,29 @@ facturacionRouter.post("/cargar-rndc/enviar", upload.array("archivos"), async (r
         return { consecutivo: r.consecutivo, radicado: r.radicado, mensaje: err?.mensaje };
       }),
     });
+    await insertCarga({
+      perfilId,
+      usuarioId: req.user!.sub,
+      archivo: f.nombre,
+      numeroFactura: preview.nf,
+      exito: envio.exito,
+      mensaje: envio.mensaje,
+      remesas: preview.remesas.length,
+    });
   }
   res.json(resultados);
+});
+
+// ── Reporte de cargas RNDC ───────────────────────────────────────────────────
+
+facturacionRouter.get("/reporte-cargas", async (req, res) => {
+  const perfilId = req.query.perfilId ? Number(req.query.perfilId) : undefined;
+  const exito =
+    req.query.exito === "true" ? true : req.query.exito === "false" ? false : undefined;
+  const desde = req.query.desde ? String(req.query.desde) : undefined;
+  const hasta = req.query.hasta ? String(req.query.hasta) : undefined;
+  const reporte = await listCargas({ perfilId, exito, desde, hasta });
+  res.json(reporte);
 });
 
 // ── Consultar factura / por remesa ───────────────────────────────────────────
