@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { UploadCloud } from "lucide-react";
+import { Download, UploadCloud } from "lucide-react";
 import { apiUpload, ApiError } from "../../lib/api";
 import { usePerfilStore } from "../../store/perfilStore";
 
@@ -96,7 +96,17 @@ export function GenerarExcel() {
 
   return (
     <div className="max-w-3xl space-y-6">
-      <h2 className="text-lg font-semibold text-slate-800">Generar facturas vía Excel</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-slate-800">Generar facturas vía Excel</h2>
+        <a
+          href="/plantilla_generar_facturas.xlsx"
+          download
+          className="flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900"
+        >
+          <Download size={16} />
+          Descargar plantilla Excel
+        </a>
+      </div>
       {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       {!perfilActivoId && (
         <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700">Selecciona un perfil activo arriba primero.</p>
