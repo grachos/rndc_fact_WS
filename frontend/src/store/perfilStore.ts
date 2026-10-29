@@ -3,7 +3,10 @@ import type { Perfil } from "@fe-tool/shared";
 
 interface PerfilState {
   perfilActivoId: number | null;
+  /** Empresas the logged-in user can work with (all of them for admins). */
+  perfiles: Perfil[];
   setPerfilActivo: (id: number | null) => void;
+  setPerfiles: (perfiles: Perfil[]) => void;
 }
 
 const STORAGE_KEY = "fe-tool-perfil-activo";
@@ -13,11 +16,13 @@ export const usePerfilStore = create<PerfilState>((set) => ({
     const raw = localStorage.getItem(STORAGE_KEY);
     return raw ? Number(raw) : null;
   })(),
+  perfiles: [],
   setPerfilActivo: (id) => {
     if (id === null) localStorage.removeItem(STORAGE_KEY);
     else localStorage.setItem(STORAGE_KEY, String(id));
     set({ perfilActivoId: id });
   },
+  setPerfiles: (perfiles) => set({ perfiles }),
 }));
 
 export function perfilActivo(perfiles: Perfil[], id: number | null): Perfil | null {

@@ -4,6 +4,7 @@ import { Navigate, useLocation } from "react-router-dom";
 import type { LoginResponse } from "@fe-tool/shared";
 import { api, ApiError } from "../../lib/api";
 import { useAuthStore } from "../../store/authStore";
+import { usePerfilStore } from "../../store/perfilStore";
 
 export function Login() {
   const { token, setAuth } = useAuthStore();
@@ -24,6 +25,7 @@ export function Login() {
     setLoading(true);
     try {
       const res = await api.post<LoginResponse>("/auth/login", { email, password });
+      usePerfilStore.getState().setPerfilActivo(null);
       setAuth(res.token, res.user);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo iniciar sesión");

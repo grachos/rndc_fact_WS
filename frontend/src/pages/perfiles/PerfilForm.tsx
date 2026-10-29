@@ -118,7 +118,7 @@ export function PerfilForm() {
     <div className="max-w-3xl space-y-6">
       <form onSubmit={onSubmit} className="space-y-6">
         <h2 className="text-lg font-semibold text-slate-800">
-          {isEdit ? "Editar perfil" : "Nuevo perfil"}
+          {isEdit ? "Editar empresa" : "Nueva empresa"}
         </h2>
         {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 

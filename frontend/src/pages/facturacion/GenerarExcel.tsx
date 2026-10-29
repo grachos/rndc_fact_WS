@@ -109,7 +109,7 @@ export function GenerarExcel() {
       </div>
       {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       {!perfilActivoId && (
-        <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700">Selecciona un perfil activo arriba primero.</p>
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700">Selecciona una empresa en la barra superior primero.</p>
       )}
 
       <section className="rounded-lg border border-slate-200 bg-white p-4">

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { UploadCloud } from "lucide-react";
 import type { CargarRndcResultado } from "@fe-tool/shared";
 import { apiUpload, ApiError } from "../../lib/api";
@@ -15,13 +15,17 @@ interface Preview {
 }
 
 export function CargarRndc() {
-  const { perfilActivoId } = usePerfilStore();
+  const { perfilActivoId, perfiles } = usePerfilStore();
+  const empresa = perfiles.find((p) => p.id === perfilActivoId);
   const [files, setFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<Preview[]>([]);
   const [confirmado, setConfirmado] = useState(false);
   const [resultados, setResultados] = useState<CargarRndcResultado[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Switching empresa must be re-confirmed — never send with one the user didn't explicitly confirm.
+  useEffect(() => setConfirmado(false), [perfilActivoId]);
 
   async function onFiles(list: FileList) {
     const arr = Array.from(list);
@@ -61,7 +65,7 @@ export function CargarRndc() {
       <h2 className="text-lg font-semibold text-slate-800">Cargar facturas a RNDC</h2>
       {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       {!perfilActivoId && (
-        <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700">Selecciona un perfil activo arriba primero.</p>
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700">Selecciona una empresa en la barra superior primero.</p>
       )}
 
       <label className="flex cursor-pointer items-center justify-center gap-2 rounded-md border-2 border-dashed border-slate-300 bg-white py-8 text-sm text-slate-500 hover:border-slate-400">
@@ -101,7 +105,9 @@ export function CargarRndc() {
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2 text-sm text-slate-700">
             <input type="checkbox" checked={confirmado} onChange={(e) => setConfirmado(e.target.checked)} />
-            Confirmo que quiero subir estas facturas al RNDC (operación real, no reversible)
+            Confirmo que quiero subir estas facturas al RNDC con la empresa{" "}
+            <strong>{empresa ? `${empresa.nombre} (NIT ${empresa.nitSocio})` : "—"}</strong> (operación real, no
+            reversible)
           </label>
           <button
             type="button"

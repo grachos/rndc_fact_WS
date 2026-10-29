@@ -16,6 +16,8 @@ export const perfilSchema = z.object({
   hasMonitoreoCredenciales: z.boolean(),
   hasXmlTemplate: z.boolean(),
   xmlTemplateNombre: z.string().optional().nullable(),
+  /** Only set when listing for a user: whether this is that user's default empresa. */
+  predeterminado: z.boolean().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

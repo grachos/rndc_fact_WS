@@ -1,16 +1,14 @@
 import { useState } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 import { Users, Building2, ChevronDown } from "lucide-react";
 import { moduleGroups } from "../routes";
 import { useAuthStore } from "../store/authStore";
 
 export function Sidebar() {
-  const location = useLocation();
   const { user } = useAuthStore();
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
-    const active = moduleGroups.find((g) => g.modules.some((m) => m.path === location.pathname));
-    return active ? { [active.key]: true } : {};
-  });
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(moduleGroups.map((g) => [g.key, true]))
+  );
 
   return (
     <aside className="flex h-full w-72 flex-col overflow-y-auto border-r border-slate-200 bg-white">
@@ -28,7 +26,7 @@ export function Sidebar() {
           }
         >
           <Building2 size={16} />
-          Perfiles
+          Empresas
         </NavLink>
 
         {user?.role === "admin" && (
@@ -48,6 +46,11 @@ export function Sidebar() {
         <div className="my-2 border-t border-slate-100" />
 
         {moduleGroups.map((group) => {
+          // Unimplemented ("próximamente") modules stay out of the menu until they're built.
+          const visibles = group.modules.filter(
+            (m) => !m.placeholder && (!m.adminOnly || user?.role === "admin")
+          );
+          if (visibles.length === 0) return null;
           const isOpen = Boolean(openGroups[group.key]);
           return (
             <div key={group.key}>
@@ -61,9 +64,7 @@ export function Sidebar() {
               </button>
               {isOpen && (
                 <div className="ml-2 space-y-0.5 border-l border-slate-100 pl-2">
-                  {group.modules
-                    .filter((m) => !m.adminOnly || user?.role === "admin")
-                    .map((m) => (
+                  {visibles.map((m) => (
                     <NavLink
                       key={m.path}
                       to={m.path}

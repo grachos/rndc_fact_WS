@@ -13,26 +13,37 @@ import {
 } from "../db/queries/perfiles.queries.js";
 import { requireAuth } from "../middleware/auth.js";
 import { requireRole } from "../middleware/requireRole.js";
+import { getAsignaciones, puedeUsarPerfil } from "../db/queries/usuarioPerfiles.queries.js";
 
 export const perfilesRouter = Router();
 perfilesRouter.use(requireAuth);
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
-// Any authenticated staff member can list/view perfiles — they need to pick one to operate on.
-perfilesRouter.get("/", async (_req, res) => {
-  res.json(await listPerfiles());
+// Admins see every empresa; operadores only the ones assigned to them. Each item is
+// flagged with whether it's the caller's default empresa.
+perfilesRouter.get("/", async (req, res) => {
+  const [perfiles, asignaciones] = await Promise.all([listPerfiles(), getAsignaciones(req.user!.sub)]);
+  const visibles =
+    req.user!.role === "admin" ? perfiles : perfiles.filter((p) => asignaciones.perfilIds.includes(p.id));
+  res.json(visibles.map((p) => ({ ...p, predeterminado: p.id === asignaciones.perfilPredeterminadoId })));
 });
 
 perfilesRouter.get("/:id", async (req, res) => {
-  const perfil = await getPerfil(Number(req.params.id));
+  const id = Number(req.params.id);
+  if (!(await puedeUsarPerfil(req.user!, id))) return res.status(404).json({ error: "Perfil no encontrado" });
+  const perfil = await getPerfil(id);
   if (!perfil) return res.status(404).json({ error: "Perfil no encontrado" });
   res.json(perfil);
 });
 
-// Any staff member can view/download the template — only admins can change it (see below).
+// Staff can view/download the template of an empresa they have access to — only admins can change it (see below).
 perfilesRouter.get("/:id/xml-template", async (req, res) => {
-  const template = await getPerfilXmlTemplate(Number(req.params.id));
+  const id = Number(req.params.id);
+  if (!(await puedeUsarPerfil(req.user!, id))) {
+    return res.status(404).json({ error: "Este perfil no tiene una plantilla XML cargada" });
+  }
+  const template = await getPerfilXmlTemplate(id);
   if (!template) return res.status(404).json({ error: "Este perfil no tiene una plantilla XML cargada" });
   res.json(template);
 });

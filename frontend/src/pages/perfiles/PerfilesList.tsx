@@ -37,13 +37,13 @@ export function PerfilesList() {
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-slate-800">Perfiles</h2>
+        <h2 className="text-lg font-semibold text-slate-800">Empresas</h2>
         {isAdmin && (
           <Link
             to="/perfiles/nuevo"
             className="flex items-center gap-1 rounded-md bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-900"
           >
-            <Plus size={15} /> Nuevo perfil
+            <Plus size={15} /> Nueva empresa
           </Link>
         )}
       </div>

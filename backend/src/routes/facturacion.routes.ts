@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import multer from "multer";
 import JSZip from "jszip";
 import * as XLSX from "xlsx";
@@ -17,13 +17,19 @@ import { consultarRadicadoRemesa } from "../services/rndc/remesas.js";
 import { enviarFacturaRndc, parseFacturaXml } from "../services/rndc86/upload.js";
 import { autoMapear, parsearFacturas, validar, type Mapping, type FiltroGen } from "../services/excel/batchGenerar.js";
 import { insertCarga, listCargas } from "../db/queries/cargas.queries.js";
+import { puedeUsarPerfil } from "../db/queries/usuarioPerfiles.queries.js";
 
 export const facturacionRouter = Router();
 facturacionRouter.use(requireAuth);
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
-async function loadPerfilOr404(perfilId: number) {
+const SIN_ACCESO = "No tienes asignada esta empresa. Pide a un administrador que te la asigne.";
+
+async function loadPerfilOr404(req: Request, perfilId: number) {
+  if (!(await puedeUsarPerfil(req.user!, perfilId))) {
+    throw Object.assign(new Error(SIN_ACCESO), { status: 403 });
+  }
   const perfil = await getPerfilCredenciales(perfilId);
   if (!perfil) throw Object.assign(new Error("Perfil no encontrado"), { status: 404 });
   return perfil;
@@ -35,6 +41,9 @@ facturacionRouter.post("/generar-xml", async (req, res) => {
   const parsed = generarXmlInputSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Datos inválidos" });
+  }
+  if (!(await puedeUsarPerfil(req.user!, parsed.data.perfilId))) {
+    return res.status(403).json({ error: SIN_ACCESO });
   }
   try {
     const result = await generarFacturaDesdeTemplate(parsed.data);
@@ -48,7 +57,7 @@ facturacionRouter.post("/generar-xml", async (req, res) => {
 // Auto-fill radicado/peso for a remesa from RNDC (used while filling the manual form).
 facturacionRouter.get("/consultar-radicado/:consecutivo", async (req, res) => {
   const perfilId = Number(req.query.perfilId);
-  const perfil = await loadPerfilOr404(perfilId).catch((e) => {
+  const perfil = await loadPerfilOr404(req, perfilId).catch((e) => {
     res.status(e.status ?? 500).json({ error: e.message });
     return null;
   });
@@ -79,7 +88,7 @@ facturacionRouter.post("/excel/generar", upload.single("archivo"), async (req, r
   const nomCliFijo = req.body.nomCliFijo ?? "";
   const autoConsultarRadicado = req.body.autoConsultarRadicado === "true";
 
-  const perfil = await loadPerfilOr404(perfilId).catch((e) => {
+  const perfil = await loadPerfilOr404(req, perfilId).catch((e) => {
     res.status(e.status ?? 500).json({ error: e.message });
     return null;
   });
@@ -170,7 +179,7 @@ facturacionRouter.post("/cargar-rndc/preview", upload.array("archivos"), async (
 
 facturacionRouter.post("/cargar-rndc/enviar", upload.array("archivos"), async (req, res) => {
   const perfilId = Number(req.body.perfilId);
-  const perfil = await loadPerfilOr404(perfilId).catch((e) => {
+  const perfil = await loadPerfilOr404(req, perfilId).catch((e) => {
     res.status(e.status ?? 500).json({ error: e.message });
     return null;
   });
@@ -222,7 +231,7 @@ facturacionRouter.get("/reporte-cargas", requireRole("admin"), async (req, res) 
 
 facturacionRouter.get("/consultar-factura", async (req, res) => {
   const perfilId = Number(req.query.perfilId);
-  const perfil = await loadPerfilOr404(perfilId).catch((e) => {
+  const perfil = await loadPerfilOr404(req, perfilId).catch((e) => {
     res.status(e.status ?? 500).json({ error: e.message });
     return null;
   });
@@ -251,7 +260,7 @@ facturacionRouter.get("/consultar-factura", async (req, res) => {
 
 facturacionRouter.get("/consultar-factura-remesa", async (req, res) => {
   const perfilId = Number(req.query.perfilId);
-  const perfil = await loadPerfilOr404(perfilId).catch((e) => {
+  const perfil = await loadPerfilOr404(req, perfilId).catch((e) => {
     res.status(e.status ?? 500).json({ error: e.message });
     return null;
   });
