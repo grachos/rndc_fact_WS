@@ -99,7 +99,7 @@ describe("aplicarDatosXml", () => {
     const { xml, avisos } = aplicarDatosXml(
       template,
       orig,
-      { numero: "2002", cufe: "CUFENUEVO", total: "1500000", fecha: "2026-03-01", cliente: "CLIENTE NUEVO", nit: "900123456", dig: "7" },
+      { numero: "2002", cufe: "CUFENUEVO", fecha: "2026-03-01", cliente: "CLIENTE NUEVO", nit: "900123456", dig: "7" },
       [
         { radicado: "9988776", consecutivo: "300111", valor: "1500000", peso: "1500", descripcion: "Servicio de transporte", nuevo: true },
       ]
@@ -121,6 +121,9 @@ describe("aplicarDatosXml", () => {
     expect(xml).toContain("<cbc:Value>9988776</cbc:Value>");
     expect(xml).toContain("<cbc:Value>300111</cbc:Value>");
     expect(xml).toContain("<cbc:LineCountNumeric>1</cbc:LineCountNumeric>");
+    // Withholding with no TaxSubtotal: the template's 10000 on 1000000 (1%) becomes 15000 on 1500000,
+    // both at invoice level and on the line.
+    expect(xml.match(/<cac:WithholdingTaxTotal>\s*<cbc:TaxAmount currencyID="COP">15000<\/cbc:TaxAmount>/g)).toHaveLength(2);
   });
 
   it("clones the template line for multiple new remesas", () => {
@@ -129,7 +132,7 @@ describe("aplicarDatosXml", () => {
     const { xml } = aplicarDatosXml(
       template,
       orig,
-      { numero: "2003", cufe: "C3", total: "2000000", fecha: "2026-03-01", cliente: "X", nit: "1", dig: "1" },
+      { numero: "2003", cufe: "C3", fecha: "2026-03-01", cliente: "X", nit: "1", dig: "1" },
       [
         { radicado: "r1", consecutivo: "c1", valor: "1000000", peso: "500", descripcion: "d1", nuevo: true },
         { radicado: "r2", consecutivo: "c2", valor: "1000000", peso: "500", descripcion: "d2", nuevo: true },

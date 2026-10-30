@@ -5,6 +5,7 @@ import type { Perfil } from "@fe-tool/shared";
 import { api, ApiError } from "../../lib/api";
 import { useAuthStore } from "../../store/authStore";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { usePerfilStore } from "../../store/perfilStore";
 
 export function PerfilesList() {
   const { user } = useAuthStore();
@@ -28,6 +29,7 @@ export function PerfilesList() {
       await api.delete(`/perfiles/${toDelete.id}`);
       setToDelete(null);
       reload();
+      usePerfilStore.getState().recargarPerfiles();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo eliminar el perfil");
       setToDelete(null);
@@ -59,6 +61,7 @@ export function PerfilesList() {
               <th className="px-4 py-2">Usuario RNDC</th>
               <th className="px-4 py-2">Prefijo remesa</th>
               <th className="px-4 py-2">Plantilla XML</th>
+              {isAdmin && <th className="px-4 py-2">Operadores</th>}
               {isAdmin && <th className="px-4 py-2" />}
             </tr>
           </thead>
@@ -76,6 +79,21 @@ export function PerfilesList() {
                     <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">Falta</span>
                   )}
                 </td>
+                {isAdmin && (
+                  <td className="px-4 py-2">
+                    {p.operadoresAsignados ? (
+                      <span className="text-slate-600">{p.operadoresAsignados}</span>
+                    ) : (
+                      <Link
+                        to={`/perfiles/${p.id}`}
+                        className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 hover:bg-amber-200"
+                        title="Ningún operador puede facturar con esta empresa. Clic para asignarla."
+                      >
+                        Sin asignar
+                      </Link>
+                    )}
+                  </td>
+                )}
                 {isAdmin && (
                   <td className="px-4 py-2 text-right">
                     <div className="flex justify-end gap-2">
@@ -96,7 +114,7 @@ export function PerfilesList() {
             ))}
             {perfiles.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
                   No hay perfiles registrados aún.
                 </td>
               </tr>

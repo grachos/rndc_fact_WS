@@ -1,30 +1,15 @@
 import { useEffect } from "react";
 import { LogOut } from "lucide-react";
-import type { Perfil } from "@fe-tool/shared";
-import { api } from "../lib/api";
 import { useAuthStore } from "../store/authStore";
 import { usePerfilStore } from "../store/perfilStore";
 
 export function TopBar() {
   const { user, logout } = useAuthStore();
-  const { perfilActivoId, setPerfilActivo, perfiles, setPerfiles } = usePerfilStore();
+  const { perfilActivoId, setPerfilActivo, perfiles, recargarPerfiles } = usePerfilStore();
 
   useEffect(() => {
-    api
-      .get<Perfil[]>("/perfiles")
-      .then((list) => {
-        setPerfiles(list);
-        // Keep the current choice only if it's still one of this user's empresas;
-        // otherwise fall back to their default, then to the first one.
-        const actual = usePerfilStore.getState().perfilActivoId;
-        if (actual === null || !list.some((p) => p.id === actual)) {
-          const predeterminada = list.find((p) => p.predeterminado) ?? list[0];
-          setPerfilActivo(predeterminada?.id ?? null);
-        }
-      })
-      .catch(() => setPerfiles([]));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    recargarPerfiles();
+  }, [recargarPerfiles]);
 
   return (
     <header className="flex h-14 items-center justify-between border-b border-slate-200 bg-white px-4">

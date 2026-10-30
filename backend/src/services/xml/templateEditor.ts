@@ -232,6 +232,9 @@ function construirLineaRemesa(base: string, r: RemesaEdicion, pos: number): stri
       .replace(/(<cbc:TaxAmount[^>]*>)([^<]*)(<\/cbc:TaxAmount>)/g, (_m, a, v, c) => `${a}${fmtComo(v, impuesto)}${c}`);
   });
 
+  const valorPlantilla = num(leer(base, /<cbc:LineExtensionAmount[^>]*>([^<]*)</)) || num(leer(base, /<cbc:Name>\s*03\s*<\/cbc:Name>\s*<cbc:Value>([^<]*)</));
+  linea = recalcularRetenciones(linea, valor, valorPlantilla);
+
   linea = setDescripcion(linea, r.descripcion);
   // Same placement as the original FE-Tool generator: radicado → Sellers, consecutivo → Standard (schemeID 999).
   linea = setItemId(linea, "SellersItemIdentification", r.radicado);
@@ -240,6 +243,121 @@ function construirLineaRemesa(base: string, r: RemesaEdicion, pos: number): stri
   linea = setProp(linea, "02", r.consecutivo);
   linea = setProp03(linea, fmtComo(leer(base, /<cbc:Name>\s*03\s*<\/cbc:Name>\s*<cbc:Value>([^<]*)</), valor), r.peso);
   return linea;
+}
+
+interface Impuesto {
+  esquema: string;
+  porcentaje: number;
+  base: number;
+  valor: number;
+}
+
+function bloques(xml: string, tag: string): string[] {
+  return xml.match(new RegExp(`<cac:${tag}\\b[^>]*>[\\s\\S]*?</cac:${tag}>`, "g")) ?? [];
+}
+
+function subtotales(bloque: string): Impuesto[] {
+  return bloques(bloque, "TaxSubtotal").map((st) => ({
+    esquema: leer(st, /<cac:TaxScheme>\s*<cbc:ID>([^<]*)</)?.trim() ?? "",
+    porcentaje: num(leer(st, /<cbc:Percent>([^<]*)</)),
+    base: num(leer(st, /<cbc:TaxableAmount[^>]*>([^<]*)</)),
+    valor: num(leer(st, /<cbc:TaxAmount[^>]*>([^<]*)</)),
+  }));
+}
+
+/** Rewrites a tax/withholding block so each TaxSubtotal gets `nuevo(subtotal)`
+ * (or is dropped when it returns null), and the block total is their sum.
+ * Returns "" when no subtotal is left. */
+function reescribirImpuesto(bloque: string, nuevo: (st: Impuesto) => { base: number; valor: number } | null): string {
+  let total = 0;
+  let quedan = 0;
+  let out = bloque.replace(/<cac:TaxSubtotal\b[^>]*>[\s\S]*?<\/cac:TaxSubtotal>/g, (st) => {
+    const [actual] = subtotales(st);
+    const r = actual ? nuevo(actual) : null;
+    if (!r) return "";
+    quedan++;
+    total += r.valor;
+    return st
+      .replace(/(<cbc:TaxableAmount[^>]*>)([^<]*)(<\/cbc:TaxableAmount>)/, (_m, a, v, c) => `${a}${fmtComo(v, r.base)}${c}`)
+      .replace(/(<cbc:TaxAmount[^>]*>)([^<]*)(<\/cbc:TaxAmount>)/, (_m, a, v, c) => `${a}${fmtComo(v, r.valor)}${c}`);
+  });
+  if (quedan === 0) return "";
+  // The block's own TaxAmount is the first one before any TaxSubtotal.
+  out = out.replace(/^([\s\S]*?)(<cbc:TaxAmount[^>]*>)([^<]*)(<\/cbc:TaxAmount>)/, (_m, pre, a, v, c) => `${pre}${a}${fmtComo(v, total)}${c}`);
+  return out;
+}
+
+/** Template rate of a withholding subtotal: its Percent, or else amount / base. */
+function tasaRetencion(st: Impuesto, basePlantilla: number): number {
+  if (st.porcentaje > 0) return st.porcentaje / 100;
+  const base = st.base > 0 ? st.base : basePlantilla;
+  return base > 0 && st.valor >= 0 ? st.valor / base : 0;
+}
+
+/** Withholdings (e.g. retención en la fuente) keep the template's own rate, applied to `base`. */
+function recalcularRetenciones(xml: string, base: number, basePlantilla: number): string {
+  return xml.replace(/<cac:WithholdingTaxTotal\b[^>]*>[\s\S]*?<\/cac:WithholdingTaxTotal>/g, (bloque) => {
+    if (!/<cac:TaxSubtotal\b/.test(bloque)) {
+      // No breakdown: derive the rate from the block's own amount.
+      const valor = num(leer(bloque, /<cbc:TaxAmount[^>]*>([^<]*)</));
+      const tasa = basePlantilla > 0 ? valor / basePlantilla : 0;
+      return bloque.replace(/(<cbc:TaxAmount[^>]*>)([^<]*)(<\/cbc:TaxAmount>)/, (_m, a, v, c) => `${a}${fmtComo(v, base * tasa)}${c}`);
+    }
+    return reescribirImpuesto(bloque, (st) => ({ base, valor: base * tasaRetencion(st, basePlantilla) }));
+  });
+}
+
+/**
+ * Makes the invoice-level totals consistent with the generated remesa lines:
+ * - LegalMonetaryTotal from the lines (subtotal, taxable base, taxes; no allowances/charges/prepaid).
+ * - Invoice-level TaxTotal (IVA…) = sum of the same tax on the lines; dropped when no line has it
+ *   (e.g. the IVA of an extra charge that only existed in the template).
+ * - Invoice-level withholdings at the template's own rate over the new subtotal.
+ */
+function recalcularTotales(inv: string, invPlantilla: string, lineas: string[]): string {
+  const valorLinea = (l: string) =>
+    num(leer(l, /<cbc:LineExtensionAmount[^>]*>([^<]*)</)) ||
+    num(leer(l, /<cbc:Name>\s*03\s*<\/cbc:Name>\s*<cbc:Value>([^<]*)</)) ||
+    0;
+  const subtotal = lineas.reduce((s, l) => s + valorLinea(l), 0);
+  const impuestosLineas = new Map<string, { base: number; valor: number }>();
+  for (const l of lineas) {
+    for (const bloque of bloques(l, "TaxTotal")) {
+      for (const st of subtotales(bloque)) {
+        const k = `${st.esquema}|${st.porcentaje}`;
+        const acc = impuestosLineas.get(k) ?? { base: 0, valor: 0 };
+        acc.base += st.base || 0;
+        acc.valor += st.valor || 0;
+        impuestosLineas.set(k, acc);
+      }
+    }
+  }
+  const baseGravable = [...impuestosLineas.values()].reduce((s, i) => s + i.base, 0);
+  const totalImpuestos = [...impuestosLineas.values()].reduce((s, i) => s + i.valor, 0);
+  const subtotalPlantilla = num(leer(invPlantilla, /<cac:LegalMonetaryTotal\b[^>]*>[\s\S]*?<cbc:LineExtensionAmount[^>]*>([^<]*)</));
+
+  return fueraDeLineas(inv, (xml) => {
+    xml = xml.replace(/<cac:TaxTotal\b[^>]*>[\s\S]*?<\/cac:TaxTotal>\s*/g, (bloque) => {
+      const nuevo = reescribirImpuesto(bloque, (st) => impuestosLineas.get(`${st.esquema}|${st.porcentaje}`) ?? null);
+      return nuevo ? nuevo + bloque.slice(bloque.trimEnd().length) : "";
+    });
+    xml = recalcularRetenciones(xml, subtotal, subtotalPlantilla);
+    return xml.replace(/<cac:LegalMonetaryTotal\b[^>]*>[\s\S]*?<\/cac:LegalMonetaryTotal>/, (lmt) => {
+      const valores: Record<string, number> = {
+        LineExtensionAmount: subtotal,
+        TaxExclusiveAmount: baseGravable,
+        TaxInclusiveAmount: subtotal + totalImpuestos,
+        AllowanceTotalAmount: 0,
+        ChargeTotalAmount: 0,
+        PrepaidAmount: 0,
+        PayableAmount: subtotal + totalImpuestos,
+      };
+      for (const [tag, n] of Object.entries(valores)) {
+        lmt = lmt.replace(new RegExp(`(<cbc:${tag}[^>]*>)([^<]*)(</cbc:${tag}>)`), (_m, a, v, c) => `${a}${fmtComo(v, n)}${c}`);
+      }
+      return lmt;
+    });
+  });
 }
 
 /** Applies `fn` to everything except the InvoiceLine blocks, which are left untouched. */
@@ -263,7 +381,6 @@ export interface RemesaEdicion {
 export interface NuevosValores {
   numero: string;
   cufe: string;
-  total: string;
   fecha: string; // YYYY-MM-DD
   cliente: string;
   nit: string;
@@ -309,6 +426,7 @@ export function aplicarDatosXml(
   }
 
   invNuevo = invNuevo.replace(/(<cbc:LineCountNumeric>)\d+(<\/cbc:LineCountNumeric>)/, `$1${lineasResultado.length}$2`);
+  if (lineasResultado.length > 0) invNuevo = recalcularTotales(invNuevo, inv, lineasResultado);
 
   let contenidoNuevo = contenido.slice(0, mCdata.index + mCdata[1]!.length) + invNuevo + contenido.slice(mCdata.index + mCdata[1]!.length + mCdata[2]!.length);
 
@@ -333,28 +451,6 @@ export function aplicarDatosXml(
       `$1${cufeNuevo}$2`
     );
     contenidoNuevo = contenidoNuevo.split(`documentkey=${orig.cufe}`).join(`documentkey=${cufeNuevo}`);
-  }
-
-  // Valor total factura — invoice-level totals only; the remesa lines were already built
-  // with their own values and taxes. (Retention is still a flat 1% on every invoice-level
-  // TaxAmount, inherited from the original Editar XML tool.)
-  const totalNuevoRaw = nuevos.total.trim();
-  if (totalNuevoRaw && orig.totalOrig) {
-    try {
-      const totalNuevo = fmtValor(parseValor(totalNuevoRaw));
-      const retencionNueva = fmtValor(Math.round(parseValor(totalNuevoRaw) * 0.01 * 100) / 100);
-      contenidoNuevo = fueraDeLineas(contenidoNuevo, (xml) => {
-        for (const tag of ["LineExtensionAmount", "TaxInclusiveAmount", "PayableAmount", "TaxableAmount"]) {
-          xml = xml.replace(
-            new RegExp(`(<cbc:${tag}[^>]*>)${escapeRegex(orig.totalOrig)}(</cbc:${tag}>)`, "g"),
-            `$1${totalNuevo}$2`
-          );
-        }
-        return xml.replace(/(<cbc:TaxAmount[^>]*>)[^<]+(<\/cbc:TaxAmount>)/g, `$1${retencionNueva}$2`);
-      });
-    } catch (err: any) {
-      avisos.push(`No se pudo parsear el valor total '${totalNuevoRaw}': ${err?.message ?? err}`);
-    }
   }
 
   // Fecha de generación + Vencimiento (+30 días)

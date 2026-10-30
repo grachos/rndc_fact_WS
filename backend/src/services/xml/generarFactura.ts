@@ -35,7 +35,6 @@ export function generarFacturaConTemplate(
     {
       numero: datos.numeroFactura,
       cufe: datos.cufe,
-      total: String(datos.valorTotal),
       fecha: datos.fecha,
       cliente: datos.nombreCliente,
       nit: datos.nitCliente,

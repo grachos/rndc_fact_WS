@@ -13,7 +13,13 @@ import {
 } from "../db/queries/perfiles.queries.js";
 import { requireAuth } from "../middleware/auth.js";
 import { requireRole } from "../middleware/requireRole.js";
-import { getAsignaciones, puedeUsarPerfil } from "../db/queries/usuarioPerfiles.queries.js";
+import {
+  contarOperadoresPorPerfil,
+  getAsignaciones,
+  getOperadoresDePerfil,
+  puedeUsarPerfil,
+  setOperadoresDePerfil,
+} from "../db/queries/usuarioPerfiles.queries.js";
 
 export const perfilesRouter = Router();
 perfilesRouter.use(requireAuth);
@@ -23,10 +29,20 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 *
 // Admins see every empresa; operadores only the ones assigned to them. Each item is
 // flagged with whether it's the caller's default empresa.
 perfilesRouter.get("/", async (req, res) => {
-  const [perfiles, asignaciones] = await Promise.all([listPerfiles(), getAsignaciones(req.user!.sub)]);
-  const visibles =
-    req.user!.role === "admin" ? perfiles : perfiles.filter((p) => asignaciones.perfilIds.includes(p.id));
-  res.json(visibles.map((p) => ({ ...p, predeterminado: p.id === asignaciones.perfilPredeterminadoId })));
+  const esAdmin = req.user!.role === "admin";
+  const [perfiles, asignaciones, operadores] = await Promise.all([
+    listPerfiles(),
+    getAsignaciones(req.user!.sub),
+    esAdmin ? contarOperadoresPorPerfil() : Promise.resolve(null),
+  ]);
+  const visibles = esAdmin ? perfiles : perfiles.filter((p) => asignaciones.perfilIds.includes(p.id));
+  res.json(
+    visibles.map((p) => ({
+      ...p,
+      predeterminado: p.id === asignaciones.perfilPredeterminadoId,
+      ...(operadores ? { operadoresAsignados: operadores.get(p.id) ?? 0 } : {}),
+    }))
+  );
 });
 
 perfilesRouter.get("/:id", async (req, res) => {
@@ -74,6 +90,21 @@ perfilesRouter.delete("/:id", async (req, res) => {
   const ok = await deletePerfil(Number(req.params.id));
   if (!ok) return res.status(404).json({ error: "Perfil no encontrado" });
   res.status(204).end();
+});
+
+perfilesRouter.get("/:id/operadores", async (req, res) => {
+  res.json({ usuarioIds: await getOperadoresDePerfil(Number(req.params.id)) });
+});
+
+perfilesRouter.put("/:id/operadores", async (req, res) => {
+  const id = Number(req.params.id);
+  const ids = req.body?.usuarioIds;
+  if (!Array.isArray(ids) || !ids.every((x) => Number.isInteger(x))) {
+    return res.status(400).json({ error: "usuarioIds debe ser una lista de ids de usuario" });
+  }
+  if (!(await getPerfil(id))) return res.status(404).json({ error: "Perfil no encontrado" });
+  await setOperadoresDePerfil(id, ids);
+  res.json({ usuarioIds: await getOperadoresDePerfil(id) });
 });
 
 perfilesRouter.post("/:id/xml-template", upload.single("archivo"), async (req, res) => {

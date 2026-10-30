@@ -18,6 +18,8 @@ export const perfilSchema = z.object({
   xmlTemplateNombre: z.string().optional().nullable(),
   /** Only set when listing for a user: whether this is that user's default empresa. */
   predeterminado: z.boolean().optional(),
+  /** Admin listing only: how many operadores can use this empresa (0 → nobody can invoice with it). */
+  operadoresAsignados: z.number().int().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

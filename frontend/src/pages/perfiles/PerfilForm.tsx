@@ -1,9 +1,90 @@
 import { useEffect, useState } from "react";
 import type { FormEvent, InputHTMLAttributes } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { UploadCloud, Trash2, FileCheck2 } from "lucide-react";
-import type { PerfilInput, Perfil } from "@fe-tool/shared";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { UploadCloud, Trash2, FileCheck2, Users } from "lucide-react";
+import type { PerfilInput, Perfil, User } from "@fe-tool/shared";
 import { api, apiUpload, ApiError } from "../../lib/api";
+import { usePerfilStore } from "../../store/perfilStore";
+
+/** Which operadores can invoice with this empresa. Admins aren't listed: they use every empresa. */
+function OperadoresConAcceso({ perfilId, destacar }: { perfilId: string; destacar: boolean }) {
+  const [operadores, setOperadores] = useState<User[]>([]);
+  const [seleccion, setSeleccion] = useState<number[]>([]);
+  const [guardado, setGuardado] = useState<number[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [mensaje, setMensaje] = useState<{ ok: boolean; texto: string } | null>(null);
+
+  useEffect(() => {
+    api.get<User[]>("/users").then((us) => setOperadores(us.filter((u) => u.role === "operador"))).catch(() => {});
+    api.get<{ usuarioIds: number[] }>(`/perfiles/${perfilId}/operadores`).then((r) => {
+      setSeleccion(r.usuarioIds);
+      setGuardado(r.usuarioIds);
+    });
+  }, [perfilId]);
+
+  const cambios = seleccion.length !== guardado.length || seleccion.some((id) => !guardado.includes(id));
+
+  async function guardar() {
+    setSaving(true);
+    setMensaje(null);
+    try {
+      const r = await api.put<{ usuarioIds: number[] }>(`/perfiles/${perfilId}/operadores`, { usuarioIds: seleccion });
+      setSeleccion(r.usuarioIds);
+      setGuardado(r.usuarioIds);
+      setMensaje({ ok: true, texto: "Acceso guardado." });
+    } catch (err) {
+      setMensaje({ ok: false, texto: err instanceof ApiError ? err.message : "No se pudo guardar el acceso" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className={`rounded-lg border bg-white p-4 ${destacar ? "border-amber-300 ring-2 ring-amber-100" : "border-slate-200"}`}>
+      <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold text-slate-600">
+        <Users size={15} /> Operadores con acceso
+      </h3>
+      <p className="mb-3 text-xs text-slate-500">
+        Solo los operadores marcados podrán ver esta empresa y facturar con ella. Los administradores siempre tienen
+        acceso. Si es la primera empresa de un operador, queda como su predeterminada.
+      </p>
+      {guardado.length === 0 && operadores.length > 0 && (
+        <p className="mb-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700">
+          Esta empresa no está asignada a ningún operador: ningún operador podrá facturar con ella.
+        </p>
+      )}
+      {operadores.length === 0 ? (
+        <p className="text-sm text-slate-500">No hay operadores registrados. Créalos en Usuarios.</p>
+      ) : (
+        <div className="grid gap-1 sm:grid-cols-2">
+          {operadores.map((u) => (
+            <label key={u.id} className="flex items-center gap-2 rounded-md border border-slate-200 px-3 py-1.5 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={seleccion.includes(u.id)}
+                onChange={(e) =>
+                  setSeleccion((s) => (e.target.checked ? [...s, u.id] : s.filter((x) => x !== u.id)))
+                }
+              />
+              {u.email}
+            </label>
+          ))}
+        </div>
+      )}
+      <div className="mt-3 flex items-center gap-3">
+        <button
+          type="button"
+          disabled={!cambios || saving}
+          onClick={guardar}
+          className="rounded-md bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-900 disabled:opacity-50"
+        >
+          {saving ? "Guardando…" : "Guardar acceso"}
+        </button>
+        {mensaje && <span className={`text-sm ${mensaje.ok ? "text-green-700" : "text-red-700"}`}>{mensaje.texto}</span>}
+      </div>
+    </section>
+  );
+}
 
 const empty: PerfilInput = {
   nombre: "",
@@ -37,6 +118,8 @@ export function PerfilForm() {
   const { id } = useParams();
   const isEdit = Boolean(id);
   const navigate = useNavigate();
+  const recienCreada = Boolean((useLocation().state as { recienCreada?: boolean } | null)?.recienCreada);
+  const recargarPerfiles = usePerfilStore((s) => s.recargarPerfiles);
   const [form, setForm] = useState<PerfilInput>(empty);
   const [perfil, setPerfil] = useState<Perfil | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -75,11 +158,13 @@ export function PerfilForm() {
     try {
       if (isEdit) {
         await api.put(`/perfiles/${id}`, form);
+        await recargarPerfiles();
         navigate("/perfiles");
       } else {
         const created = await api.post<Perfil>("/perfiles", form);
-        // Redirect into edit mode so the XML template can be uploaded right away.
-        navigate(`/perfiles/${created.id}`);
+        await recargarPerfiles();
+        // Redirect into edit mode so the XML template and operadores can be set right away.
+        navigate(`/perfiles/${created.id}`, { state: { recienCreada: true } });
       }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo guardar el perfil");
@@ -97,6 +182,7 @@ export function PerfilForm() {
       form.append("archivo", file);
       const res = await apiUpload(`/perfiles/${id}/xml-template`, form);
       setPerfil(await res.json());
+      await recargarPerfiles();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo subir la plantilla");
     } finally {
@@ -121,6 +207,12 @@ export function PerfilForm() {
           {isEdit ? "Editar empresa" : "Nueva empresa"}
         </h2>
         {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+        {recienCreada && (
+          <p className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-800">
+            Empresa creada. Para poder facturar con ella falta: <strong>1)</strong> subir su plantilla XML y{" "}
+            <strong>2)</strong> asignarla a los operadores que van a trabajar con ella (abajo).
+          </p>
+        )}
 
         <section className="grid grid-cols-2 gap-4 rounded-lg border border-slate-200 bg-white p-4">
           <Field label="Nombre del perfil" required value={form.nombre} onChange={(e) => set("nombre", e.target.value)} />
@@ -183,6 +275,8 @@ export function PerfilForm() {
           </button>
         </div>
       </form>
+
+      {isEdit && id && <OperadoresConAcceso perfilId={id} destacar={recienCreada} />}
 
       {isEdit && (
         <section className="rounded-lg border border-slate-200 bg-white p-4">
