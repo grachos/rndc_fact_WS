@@ -45,6 +45,11 @@ export function GenerarExcel() {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filas, setFilas] = useState<number | null>(null);
+  const [resultado, setResultado] = useState<{
+    generadas: number;
+    rechazadas: { numeroFactura: string; error: string }[];
+    totalRechazadas: number;
+  } | null>(null);
 
   async function onFileChange(f: File) {
     setFile(f);
@@ -68,6 +73,7 @@ export function GenerarExcel() {
   async function onGenerar() {
     if (!file || !perfilActivoId) return;
     setError(null);
+    setResultado(null);
     setGenerating(true);
     try {
       const form = new FormData();
@@ -87,8 +93,22 @@ export function GenerarExcel() {
       a.download = "facturas_generadas.zip";
       a.click();
       URL.revokeObjectURL(url);
+      let rechazadas: { numeroFactura: string; error: string }[] = [];
+      try {
+        rechazadas = JSON.parse(decodeURIComponent(res.headers.get("X-Rechazos") ?? "%5B%5D"));
+      } catch {
+        rechazadas = [];
+      }
+      setResultado({
+        generadas: Number(res.headers.get("X-Facturas-Generadas") ?? 0),
+        rechazadas,
+        totalRechazadas: Number(res.headers.get("X-Facturas-Rechazadas") ?? rechazadas.length),
+      });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo generar el lote");
+      if (err instanceof ApiError && Array.isArray(err.body?.rechazadas)) {
+        setResultado({ generadas: 0, rechazadas: err.body.rechazadas, totalRechazadas: err.body.rechazadas.length });
+      }
     } finally {
       setGenerating(false);
     }
@@ -108,6 +128,35 @@ export function GenerarExcel() {
         </a>
       </div>
       {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {resultado && (
+        <section className="space-y-2 rounded-lg border border-slate-200 bg-white p-4 text-sm">
+          {resultado.generadas > 0 && (
+            <p className="text-green-700">{resultado.generadas} factura(s) generada(s) en el .zip.</p>
+          )}
+          {resultado.totalRechazadas > 0 && (
+            <>
+              <p className="font-medium text-red-700">
+                {resultado.totalRechazadas} factura(s) NO se generaron porque tienen errores — corrígelas y vuelve a
+                generar:
+              </p>
+              <ul className="space-y-2">
+                {resultado.rechazadas.map((r) => (
+                  <li key={r.numeroFactura} className="rounded-md bg-red-50 px-3 py-2 text-red-700">
+                    <span className="font-medium">Factura {r.numeroFactura}</span>
+                    <p className="whitespace-pre-line text-xs">{r.error}</p>
+                  </li>
+                ))}
+              </ul>
+              {resultado.totalRechazadas > resultado.rechazadas.length && (
+                <p className="text-xs text-slate-500">
+                  Se muestran las primeras {resultado.rechazadas.length}; la lista completa está en _resumen.json dentro
+                  del .zip.
+                </p>
+              )}
+            </>
+          )}
+        </section>
+      )}
       {!perfilActivoId && (
         <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700">Selecciona una empresa en la barra superior primero.</p>
       )}

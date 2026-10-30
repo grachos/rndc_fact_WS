@@ -7,6 +7,8 @@ import { getPerfilCredenciales, getPerfilXmlTemplate } from "../db/queries/perfi
 import { requireAuth } from "../middleware/auth.js";
 import { requireRole } from "../middleware/requireRole.js";
 import { generarFacturaConTemplate, generarFacturaDesdeTemplate, SinPlantillaError } from "../services/xml/generarFactura.js";
+import { PlantillaSinLineaRemesaError } from "../services/xml/templateEditor.js";
+import { FacturaInvalidaError, validarFactura } from "../services/xml/validarFactura.js";
 import {
   consultarFactura,
   consultarFacturaPorRemesa,
@@ -49,7 +51,10 @@ facturacionRouter.post("/generar-xml", async (req, res) => {
     const result = await generarFacturaDesdeTemplate(parsed.data);
     res.json(result);
   } catch (err) {
-    if (err instanceof SinPlantillaError) return res.status(400).json({ error: err.message });
+    if (err instanceof SinPlantillaError || err instanceof PlantillaSinLineaRemesaError) {
+      return res.status(400).json({ error: err.message });
+    }
+    if (err instanceof FacturaInvalidaError) return res.status(400).json({ error: err.message, errores: err.errores });
     throw err;
   }
 });
@@ -144,10 +149,28 @@ facturacionRouter.post("/excel/generar", upload.single("archivo"), async (req, r
     }
   }
 
+  const rechazadas = resumen
+    .filter((r) => !r.ok)
+    .map((r) => ({ numeroFactura: r.numeroFactura, error: r.error ?? "Error desconocido" }));
+  const generadas = resumen.length - rechazadas.length;
+  if (generadas === 0) {
+    return res.status(400).json({
+      error: `No se generó ninguna factura: las ${rechazadas.length} tienen errores.`,
+      rechazadas,
+    });
+  }
+
   zip.file("_resumen.json", JSON.stringify(resumen, null, 2));
   const zipBuffer = await zip.generateAsync({ type: "nodebuffer" });
   res.setHeader("Content-Type", "application/zip");
   res.setHeader("Content-Disposition", 'attachment; filename="facturas_generadas.zip"');
+  // Summary for the UI (the full list is also in _resumen.json inside the zip).
+  res.setHeader("X-Facturas-Generadas", String(generadas));
+  res.setHeader("X-Facturas-Rechazadas", String(rechazadas.length));
+  res.setHeader(
+    "X-Rechazos",
+    encodeURIComponent(JSON.stringify(rechazadas.slice(0, 20).map((r) => ({ ...r, error: r.error.slice(0, 400) }))))
+  );
   res.send(zipBuffer);
 });
 
@@ -170,10 +193,17 @@ async function expandirArchivos(files: Express.Multer.File[]): Promise<{ nombre:
   return salida;
 }
 
+function problemasDeCarga(contenido: Buffer): string[] {
+  return validarFactura(contenido.toString("utf-8"), { permitirLineasSinRemesa: true });
+}
+
 facturacionRouter.post("/cargar-rndc/preview", upload.array("archivos"), async (req, res) => {
   const files = (req.files as Express.Multer.File[]) ?? [];
   const expandidos = await expandirArchivos(files);
-  const previews = expandidos.map((f) => parseFacturaXml(f.nombre, f.contenido));
+  const previews = expandidos.map((f) => ({
+    ...parseFacturaXml(f.nombre, f.contenido),
+    problemas: problemasDeCarga(f.contenido),
+  }));
   res.json(previews);
 });
 
@@ -191,6 +221,18 @@ facturacionRouter.post("/cargar-rndc/enviar", upload.array("archivos"), async (r
   const resultados = [];
   for (const f of expandidos) {
     const preview = parseFacturaXml(f.nombre, f.contenido);
+    const problemas = problemasDeCarga(f.contenido);
+    if (problemas.length > 0) {
+      // Blocked before reaching the RNDC — not an upload attempt, so it isn't logged in cargas_rndc.
+      resultados.push({
+        archivo: f.nombre,
+        numeroFactura: preview.nf,
+        exito: false,
+        mensaje: `No se envió al RNDC porque el XML tiene errores: ${problemas.join(" | ")}`,
+        remesas: preview.remesas.map((r) => ({ consecutivo: r.consecutivo, radicado: r.radicado })),
+      });
+      continue;
+    }
     const envio = await enviarFacturaRndc(f.contenido, perfil.rndcUsuario, perfil.rndcPassword, perfil.nitSocio);
     resultados.push({
       archivo: f.nombre,

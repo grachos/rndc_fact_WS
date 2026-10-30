@@ -154,8 +154,100 @@ function setProp03(linea: string, valor: string, peso: string): string {
   return linea.replace(re, `$1${valor}$2${peso}$3`);
 }
 
-function setInvoicedQty(linea: string, peso: string): string {
-  return linea.replace(/(<cbc:InvoicedQuantity[^>]*>)[^<]*(<\/cbc:InvoicedQuantity>)/, `$1${peso}$2`);
+function tieneProp(linea: string, name: string): boolean {
+  return new RegExp(`<cac:AdditionalItemProperty>\\s*<cbc:Name>\\s*${escapeRegex(name)}\\s*</cbc:Name>`).test(linea);
+}
+
+/** A remesa line is one carrying the RNDC properties 01 (radicado), 02 (consecutivo)
+ * and 03 (valor + peso). Templates can also contain other lines (extra charges,
+ * "ADICIONALES", IVA-bearing items) that must never be used as the model. */
+export function esLineaRemesa(linea: string): boolean {
+  return tieneProp(linea, "01") && tieneProp(linea, "02") && tieneProp(linea, "03");
+}
+
+export class PlantillaSinLineaRemesaError extends Error {
+  constructor() {
+    super(
+      "La plantilla XML de esta empresa no tiene ninguna línea de remesa válida (con radicado, consecutivo y valor en las propiedades 01, 02 y 03). Sube como plantilla una factura real que incluya al menos una remesa."
+    );
+  }
+}
+
+function num(texto: string | undefined): number {
+  const n = Number((texto ?? "").trim());
+  return Number.isFinite(n) ? n : NaN;
+}
+
+/** Formats `n` with the same number of decimals the template used for that field,
+ * so each empresa keeps its own format ("3648001.0160" vs "8679000.00" vs "8679000"). */
+function fmtComo(textoPlantilla: string | undefined, n: number): string {
+  const decimales = /\.(\d+)\s*$/.exec(textoPlantilla ?? "")?.[1]?.length ?? 0;
+  return n.toFixed(decimales);
+}
+
+function leer(linea: string, re: RegExp): string | undefined {
+  return re.exec(linea)?.[1];
+}
+
+function setTag(linea: string, tag: string, valor: string): string {
+  return linea.replace(new RegExp(`(<cbc:${tag}[^>]*>)[^<]*(</cbc:${tag}>)`), `$1${valor}$2`);
+}
+
+/** Sets the cbc:ID inside an Item identification block, also when the template has it empty (`<cbc:ID />`). */
+function setItemId(linea: string, bloque: string, valor: string): string {
+  const re = new RegExp(`(<cac:${bloque}>\\s*<cbc:ID)([^>]*?)(?:\\s*/>|>[^<]*</cbc:ID>)`);
+  return linea.replace(re, (_m, inicio: string, attrs: string) => `${inicio}${attrs}>${valor}</cbc:ID>`);
+}
+
+/**
+ * Builds one remesa InvoiceLine from a template remesa line, overwriting every
+ * remesa-specific field so nothing from the template's own remesa survives. Quantity
+ * and price follow the template's convention: some empresas bill per kilogram
+ * (InvoicedQuantity = peso, PriceAmount = valor / peso), others per trip (quantity 1).
+ */
+function construirLineaRemesa(base: string, r: RemesaEdicion, pos: number): string {
+  const valor = parseValor(r.valor);
+  const peso = num(r.peso);
+
+  const qtyTexto = leer(base, /<cbc:InvoicedQuantity[^>]*>([^<]*)</);
+  const pesoTexto = leer(base, /<cbc:ValueQuantity[^>]*>([^<]*)</);
+  const baseTexto = leer(base, /<cbc:BaseQuantity[^>]*>([^<]*)</);
+  const factPorPeso = num(qtyTexto) > 0 && num(qtyTexto) === num(pesoTexto);
+  const cantidad = factPorPeso ? peso : num(qtyTexto);
+  const baseIgualCantidad = num(baseTexto) === num(qtyTexto);
+
+  let linea = base.replace(/<cbc:ID[^>]*>[^<]*<\/cbc:ID>/, `<cbc:ID schemeID="1">${pos + 1}</cbc:ID>`);
+  linea = setTag(linea, "Note", r.descripcion);
+  linea = setTag(linea, "InvoicedQuantity", fmtComo(qtyTexto, cantidad));
+  linea = setTag(linea, "LineExtensionAmount", fmtComo(leer(base, /<cbc:LineExtensionAmount[^>]*>([^<]*)</), valor));
+  if (baseIgualCantidad) linea = setTag(linea, "BaseQuantity", fmtComo(baseTexto, cantidad));
+  linea = setTag(linea, "PriceAmount", fmtComo(leer(base, /<cbc:PriceAmount[^>]*>([^<]*)</), cantidad > 0 ? valor / cantidad : valor));
+
+  // Line-level tax (e.g. Sotracar's IVA 0%): keep the template's rate, recompute on the new value.
+  linea = linea.replace(/<cac:TaxTotal\b[^>]*>[\s\S]*?<\/cac:TaxTotal>/, (bloque) => {
+    const pct = num(leer(bloque, /<cbc:Percent>([^<]*)</));
+    const impuesto = Number.isFinite(pct) ? (valor * pct) / 100 : 0;
+    return bloque
+      .replace(/(<cbc:TaxableAmount[^>]*>)([^<]*)(<\/cbc:TaxableAmount>)/g, (_m, a, v, c) => `${a}${fmtComo(v, valor)}${c}`)
+      .replace(/(<cbc:TaxAmount[^>]*>)([^<]*)(<\/cbc:TaxAmount>)/g, (_m, a, v, c) => `${a}${fmtComo(v, impuesto)}${c}`);
+  });
+
+  linea = setDescripcion(linea, r.descripcion);
+  // Same placement as the original FE-Tool generator: radicado → Sellers, consecutivo → Standard (schemeID 999).
+  linea = setItemId(linea, "SellersItemIdentification", r.radicado);
+  linea = setItemId(linea, "StandardItemIdentification", r.consecutivo);
+  linea = setProp(linea, "01", r.radicado);
+  linea = setProp(linea, "02", r.consecutivo);
+  linea = setProp03(linea, fmtComo(leer(base, /<cbc:Name>\s*03\s*<\/cbc:Name>\s*<cbc:Value>([^<]*)</), valor), r.peso);
+  return linea;
+}
+
+/** Applies `fn` to everything except the InvoiceLine blocks, which are left untouched. */
+function fueraDeLineas(xml: string, fn: (fragmento: string) => string): string {
+  return xml
+    .split(/(<cac:InvoiceLine[\s\S]*?<\/cac:InvoiceLine>)/)
+    .map((parte) => (parte.startsWith("<cac:InvoiceLine") ? parte : fn(parte)))
+    .join("");
 }
 
 export interface RemesaEdicion {
@@ -164,7 +256,7 @@ export interface RemesaEdicion {
   valor: string;
   peso: string;
   descripcion: string;
-  /** true for a line that doesn't exist in the template yet — cloned from the template's first line. */
+  /** true for a line that doesn't exist in the template yet — built from the template's first remesa line. */
   nuevo: boolean;
 }
 
@@ -198,36 +290,13 @@ export function aplicarDatosXml(
 
   const inv = mCdata[2]!;
   const lineasOrig = inv.match(/<cac:InvoiceLine[\s\S]*?<\/cac:InvoiceLine>/g) ?? [];
-  const plantillaLine = lineasOrig[0];
+  const plantillaLine = lineasOrig.find(esLineaRemesa);
+  if (remesas.some((r) => r.nuevo) && !plantillaLine) throw new PlantillaSinLineaRemesaError();
 
   const lineasResultado: string[] = [];
   remesas.forEach((r, pos) => {
-    let valFmt: string;
-    try {
-      valFmt = fmtValor(parseValor(r.valor));
-    } catch {
-      valFmt = r.valor;
-    }
-
-    let linea: string;
-    if (r.nuevo && plantillaLine) {
-      linea = plantillaLine.replace(/(<cbc:ID[^>]*>)\d+(<\/cbc:ID>)/, `$1${pos + 1}$2`);
-      linea = setProp(linea, "01", r.radicado);
-      linea = setProp(linea, "02", r.consecutivo);
-      linea = setProp03(linea, valFmt || "0", r.peso || "0");
-      linea = setInvoicedQty(linea, r.peso || "0");
-      linea = setDescripcion(linea, r.descripcion ?? "");
-    } else if (pos < lineasOrig.length) {
-      linea = lineasOrig[pos]!.replace(/(<cbc:ID[^>]*>)\d+(<\/cbc:ID>)/, `$1${pos + 1}$2`);
-      linea = setProp(linea, "01", r.radicado);
-      linea = setProp(linea, "02", r.consecutivo);
-      linea = setProp03(linea, valFmt, r.peso);
-      linea = setInvoicedQty(linea, r.peso);
-      linea = setDescripcion(linea, r.descripcion ?? "");
-    } else {
-      return;
-    }
-    lineasResultado.push(linea);
+    const base = r.nuevo ? plantillaLine : lineasOrig[pos];
+    if (base) lineasResultado.push(construirLineaRemesa(base, r, pos));
   });
 
   let invNuevo: string;
@@ -266,25 +335,23 @@ export function aplicarDatosXml(
     contenidoNuevo = contenidoNuevo.split(`documentkey=${orig.cufe}`).join(`documentkey=${cufeNuevo}`);
   }
 
-  // Valor total factura (note: retention is applied uniformly to every <TaxAmount> tag
-  // found, invoice-level and per-line — a known simplification inherited from the
-  // original Editar XML tool; correct for the common single/uniform-value-remesa case).
+  // Valor total factura — invoice-level totals only; the remesa lines were already built
+  // with their own values and taxes. (Retention is still a flat 1% on every invoice-level
+  // TaxAmount, inherited from the original Editar XML tool.)
   const totalNuevoRaw = nuevos.total.trim();
   if (totalNuevoRaw && orig.totalOrig) {
     try {
       const totalNuevo = fmtValor(parseValor(totalNuevoRaw));
       const retencionNueva = fmtValor(Math.round(parseValor(totalNuevoRaw) * 0.01 * 100) / 100);
-      for (const tag of ["LineExtensionAmount", "TaxInclusiveAmount", "PayableAmount"]) {
-        contenidoNuevo = contenidoNuevo.replace(
-          new RegExp(`(<cbc:${tag}[^>]*>)${escapeRegex(orig.totalOrig)}(</cbc:${tag}>)`, "g"),
-          `$1${totalNuevo}$2`
-        );
-      }
-      contenidoNuevo = contenidoNuevo.replace(
-        new RegExp(`(<cbc:TaxableAmount[^>]*>)${escapeRegex(orig.totalOrig)}(</cbc:TaxableAmount>)`, "g"),
-        `$1${totalNuevo}$2`
-      );
-      contenidoNuevo = contenidoNuevo.replace(/(<cbc:TaxAmount[^>]*>)[^<]+(<\/cbc:TaxAmount>)/g, `$1${retencionNueva}$2`);
+      contenidoNuevo = fueraDeLineas(contenidoNuevo, (xml) => {
+        for (const tag of ["LineExtensionAmount", "TaxInclusiveAmount", "PayableAmount", "TaxableAmount"]) {
+          xml = xml.replace(
+            new RegExp(`(<cbc:${tag}[^>]*>)${escapeRegex(orig.totalOrig)}(</cbc:${tag}>)`, "g"),
+            `$1${totalNuevo}$2`
+          );
+        }
+        return xml.replace(/(<cbc:TaxAmount[^>]*>)[^<]+(<\/cbc:TaxAmount>)/g, `$1${retencionNueva}$2`);
+      });
     } catch (err: any) {
       avisos.push(`No se pudo parsear el valor total '${totalNuevoRaw}': ${err?.message ?? err}`);
     }

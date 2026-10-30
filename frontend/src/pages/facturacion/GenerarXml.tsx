@@ -86,7 +86,7 @@ export function GenerarXml() {
   return (
     <form onSubmit={onSubmit} className="max-w-3xl space-y-6">
       <h2 className="text-lg font-semibold text-slate-800">Generar XML</h2>
-      {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="whitespace-pre-line rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       {avisos.length > 0 && (
         <div className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700">
           {avisos.map((a, i) => (

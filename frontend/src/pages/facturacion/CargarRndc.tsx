@@ -12,6 +12,8 @@ interface Preview {
   clienteNit: string;
   remesas: { consecutivo: string; radicado: string; valor: string }[];
   error?: string;
+  /** Validation problems: these files are blocked and won't be sent to the RNDC. */
+  problemas: string[];
 }
 
 export function CargarRndc() {
@@ -84,6 +86,7 @@ export function CargarRndc() {
                 <th className="px-3 py-2">CUFE</th>
                 <th className="px-3 py-2">Cliente</th>
                 <th className="px-3 py-2">Remesas</th>
+                <th className="px-3 py-2">Validación</th>
               </tr>
             </thead>
             <tbody>
@@ -94,11 +97,29 @@ export function CargarRndc() {
                   <td className="px-3 py-2">{p.cufe}</td>
                   <td className="px-3 py-2">{p.cliente}</td>
                   <td className="px-3 py-2">{p.remesas.length}</td>
+                  <td className="px-3 py-2">
+                    {p.problemas.length === 0 ? (
+                      <span className="text-green-700">OK</span>
+                    ) : (
+                      <ul className="list-disc pl-4 text-xs text-red-700">
+                        {p.problemas.map((x) => (
+                          <li key={x}>{x}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+
+      {previews.some((p) => p.problemas.length > 0) && (
+        <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+          {previews.filter((p) => p.problemas.length > 0).length} archivo(s) tienen errores y NO se enviarán al RNDC.
+          Regenera esas facturas y vuelve a cargarlas.
+        </p>
       )}
 
       {previews.length > 0 && (

@@ -2,10 +2,13 @@ import { useAuthStore } from "../store/authStore";
 
 export class ApiError extends Error {
   status: number;
+  /** Parsed JSON error body, for endpoints that return details (e.g. a list of validation errors). */
+  body: any;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, body?: any) {
     super(message);
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -26,7 +29,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const body = await res.json().catch(() => null);
-    throw new ApiError(body?.error ?? `Error ${res.status}`, res.status);
+    throw new ApiError(body?.error ?? `Error ${res.status}`, res.status, body);
   }
 
   if (res.status === 204) return undefined as T;
@@ -56,7 +59,7 @@ export async function apiUpload(path: string, form: FormData): Promise<Response>
   if (res.status === 401) useAuthStore.getState().logout();
   if (!res.ok) {
     const body = await res.json().catch(() => null);
-    throw new ApiError(body?.error ?? `Error ${res.status}`, res.status);
+    throw new ApiError(body?.error ?? `Error ${res.status}`, res.status, body);
   }
   return res;
 }

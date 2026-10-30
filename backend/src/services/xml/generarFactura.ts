@@ -1,6 +1,7 @@
 import type { GenerarXmlInput } from "@fe-tool/shared";
 import { getPerfilXmlTemplate } from "../../db/queries/perfiles.queries.js";
 import { aplicarDatosXml, parseXmlTemplate, type RemesaEdicion } from "./templateEditor.js";
+import { FacturaInvalidaError, validarFactura } from "./validarFactura.js";
 
 export class SinPlantillaError extends Error {
   constructor(perfilId: number) {
@@ -11,8 +12,9 @@ export class SinPlantillaError extends Error {
 }
 
 /** Generates one invoice by editing a template's header fields and remesa lines with
- * this invoice's data. All remesa lines are treated as new (cloned from the template's
- * first InvoiceLine) since a generated invoice's remesas are never the template's own. */
+ * this invoice's data. All remesa lines are treated as new (built from the template's
+ * first remesa line) since a generated invoice's remesas are never the template's own.
+ * Throws FacturaInvalidaError instead of returning an XML that fails validation. */
 export function generarFacturaConTemplate(
   templateContenido: string,
   datos: GenerarXmlInput
@@ -41,6 +43,14 @@ export function generarFacturaConTemplate(
     },
     remesas
   );
+
+  const errores = validarFactura(xml, {
+    esperado: {
+      remesas: datos.remesas.map((r) => ({ consecutivo: r.consecutivo, radicado: r.radicado, valor: r.valor })),
+      valorTotal: datos.valorTotal,
+    },
+  });
+  if (errores.length > 0) throw new FacturaInvalidaError(errores);
 
   return { xml, filename: `FACTURA_${datos.numeroFactura}.xml`, avisos };
 }
