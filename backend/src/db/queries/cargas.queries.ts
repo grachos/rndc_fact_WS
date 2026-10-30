@@ -39,12 +39,17 @@ export async function insertCarga(input: {
   exito: boolean;
   mensaje: string;
   remesas: number;
-}): Promise<void> {
-  await pool.query(
+}): Promise<number> {
+  const { rows } = await pool.query<{ id: number }>(
     `insert into cargas_rndc (perfil_id, usuario_id, archivo, numero_factura, exito, mensaje, remesas)
-     values ($1, $2, $3, $4, $5, $6, $7)`,
+     values ($1, $2, $3, $4, $5, $6, $7) returning id`,
     [input.perfilId, input.usuarioId, input.archivo, input.numeroFactura, input.exito, input.mensaje, input.remesas]
   );
+  return rows[0]!.id;
+}
+
+export async function actualizarCarga(id: number, resultado: { exito: boolean; mensaje: string }): Promise<void> {
+  await pool.query("update cargas_rndc set exito = $2, mensaje = $3 where id = $1", [id, resultado.exito, resultado.mensaje]);
 }
 
 export interface ListCargasFiltros {
@@ -68,11 +73,11 @@ export async function listCargas(filtros: ListCargasFiltros): Promise<CargaRndcR
   }
   if (filtros.desde) {
     params.push(filtros.desde);
-    condiciones.push(`c.created_at >= $${params.length}::date`);
+    condiciones.push(`(c.created_at at time zone 'America/Bogota')::date >= $${params.length}::date`);
   }
   if (filtros.hasta) {
     params.push(filtros.hasta);
-    condiciones.push(`c.created_at < ($${params.length}::date + interval '1 day')`);
+    condiciones.push(`(c.created_at at time zone 'America/Bogota')::date <= $${params.length}::date`);
   }
 
   const where = condiciones.length > 0 ? `where ${condiciones.join(" and ")}` : "";

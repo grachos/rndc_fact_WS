@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import JSZip from "jszip";
 import { UploadCloud } from "lucide-react";
 import type { CargarRndcResultado } from "@fe-tool/shared";
 import { apiUpload, ApiError } from "../../lib/api";
@@ -16,6 +17,24 @@ interface Preview {
   problemas: string[];
 }
 
+/** Every invoice XML in the selection, with .zip files unpacked (same rule as the server:
+ * only .xml members, file name without folders). Lets each invoice go in its own request. */
+async function expandirXmls(files: File[]): Promise<File[]> {
+  const salida: File[] = [];
+  for (const f of files) {
+    if (!f.name.toLowerCase().endsWith(".zip")) {
+      salida.push(f);
+      continue;
+    }
+    const zip = await JSZip.loadAsync(f);
+    for (const [ruta, entrada] of Object.entries(zip.files)) {
+      if (entrada.dir || !ruta.toLowerCase().endsWith(".xml")) continue;
+      salida.push(new File([await entrada.async("blob")], ruta.split("/").pop()!, { type: "text/xml" }));
+    }
+  }
+  return salida;
+}
+
 export function CargarRndc() {
   const { perfilActivoId, perfiles } = usePerfilStore();
   const empresa = perfiles.find((p) => p.id === perfilActivoId);
@@ -24,6 +43,7 @@ export function CargarRndc() {
   const [confirmado, setConfirmado] = useState(false);
   const [resultados, setResultados] = useState<CargarRndcResultado[]>([]);
   const [loading, setLoading] = useState(false);
+  const [progreso, setProgreso] = useState<{ hechas: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Switching empresa must be re-confirmed — never send with one the user didn't explicitly confirm.
@@ -45,18 +65,40 @@ export function CargarRndc() {
     }
   }
 
+  // One invoice per request: each request then waits for at most one RNDC answer (well
+  // within the function time limit), results show up as they arrive, and a failure
+  // affects only that invoice instead of losing the whole batch's response.
   async function onEnviar() {
     if (!perfilActivoId || files.length === 0) return;
     setLoading(true);
     setError(null);
+    setResultados([]);
     try {
-      const form = new FormData();
-      files.forEach((f) => form.append("archivos", f));
-      form.append("perfilId", String(perfilActivoId));
-      const res = await apiUpload("/facturacion/cargar-rndc/enviar", form);
-      setResultados(await res.json());
+      const xmls = await expandirXmls(files);
+      setProgreso({ hechas: 0, total: xmls.length });
+      for (const [i, xml] of xmls.entries()) {
+        let resultado: CargarRndcResultado;
+        try {
+          const form = new FormData();
+          form.append("archivos", xml);
+          form.append("perfilId", String(perfilActivoId));
+          const res = await apiUpload("/facturacion/cargar-rndc/enviar", form);
+          const [r] = (await res.json()) as CargarRndcResultado[];
+          resultado = r ?? { archivo: xml.name, numeroFactura: "", exito: false, mensaje: "Sin respuesta del servidor", remesas: [] };
+        } catch (err) {
+          resultado = {
+            archivo: xml.name,
+            numeroFactura: previews.find((p) => p.archivo === xml.name)?.nf ?? "",
+            exito: false,
+            mensaje: `No se pudo completar el envío (${err instanceof ApiError ? err.message : "error de conexión"}). Consulta la factura en el RNDC antes de reenviarla.`,
+            remesas: [],
+          };
+        }
+        setResultados((prev) => [...prev, resultado]);
+        setProgreso({ hechas: i + 1, total: xmls.length });
+      }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo subir las facturas");
+      setError(err instanceof Error ? `No se pudieron leer los archivos: ${err.message}` : "No se pudieron leer los archivos");
     } finally {
       setLoading(false);
     }
@@ -136,7 +178,7 @@ export function CargarRndc() {
             onClick={onEnviar}
             className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:opacity-60"
           >
-            {loading ? "Subiendo…" : "Subir al RNDC"}
+            {loading ? (progreso ? `Enviando ${Math.min(progreso.hechas + 1, progreso.total)} de ${progreso.total}…` : "Preparando…") : "Subir al RNDC"}
           </button>
         </div>
       )}

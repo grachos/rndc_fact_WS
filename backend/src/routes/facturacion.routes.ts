@@ -18,7 +18,7 @@ import {
 import { consultarRadicadoRemesa } from "../services/rndc/remesas.js";
 import { enviarFacturaRndc, parseFacturaXml } from "../services/rndc86/upload.js";
 import { autoMapear, parsearFacturas, validar, type Mapping, type FiltroGen } from "../services/excel/batchGenerar.js";
-import { insertCarga, listCargas } from "../db/queries/cargas.queries.js";
+import { actualizarCarga, insertCarga, listCargas } from "../db/queries/cargas.queries.js";
 import { puedeUsarPerfil } from "../db/queries/usuarioPerfiles.queries.js";
 
 export const facturacionRouter = Router();
@@ -222,18 +222,34 @@ facturacionRouter.post("/cargar-rndc/enviar", upload.array("archivos"), async (r
   for (const f of expandidos) {
     const preview = parseFacturaXml(f.nombre, f.contenido);
     const problemas = problemasDeCarga(f.contenido);
+    const registro = {
+      perfilId,
+      usuarioId: req.user!.sub,
+      archivo: f.nombre,
+      numeroFactura: preview.nf,
+      remesas: preview.remesas.length,
+    };
     if (problemas.length > 0) {
-      // Blocked before reaching the RNDC — not an upload attempt, so it isn't logged in cargas_rndc.
+      const mensaje = `No se envió al RNDC porque el XML tiene errores: ${problemas.join(" | ")}`;
+      await insertCarga({ ...registro, exito: false, mensaje });
       resultados.push({
         archivo: f.nombre,
         numeroFactura: preview.nf,
         exito: false,
-        mensaje: `No se envió al RNDC porque el XML tiene errores: ${problemas.join(" | ")}`,
+        mensaje,
         remesas: preview.remesas.map((r) => ({ consecutivo: r.consecutivo, radicado: r.radicado })),
       });
       continue;
     }
+    // Recorded BEFORE contacting the RNDC so every attempt leaves a trace, even if the
+    // request is cut off while waiting for the RNDC's answer; updated with the real result.
+    const cargaId = await insertCarga({
+      ...registro,
+      exito: false,
+      mensaje: "Sin respuesta del RNDC: el envío se interrumpió antes de recibir respuesta. Consulta la factura en el RNDC antes de reenviarla.",
+    });
     const envio = await enviarFacturaRndc(f.contenido, perfil.rndcUsuario, perfil.rndcPassword, perfil.nitSocio);
+    await actualizarCarga(cargaId, { exito: envio.exito, mensaje: envio.mensaje });
     resultados.push({
       archivo: f.nombre,
       numeroFactura: preview.nf,
@@ -243,15 +259,6 @@ facturacionRouter.post("/cargar-rndc/enviar", upload.array("archivos"), async (r
         const err = envio.detalle?.find((d) => d.radicado === r.radicado);
         return { consecutivo: r.consecutivo, radicado: r.radicado, mensaje: err?.mensaje };
       }),
-    });
-    await insertCarga({
-      perfilId,
-      usuarioId: req.user!.sub,
-      archivo: f.nombre,
-      numeroFactura: preview.nf,
-      exito: envio.exito,
-      mensaje: envio.mensaje,
-      remesas: preview.remesas.length,
     });
   }
   res.json(resultados);
