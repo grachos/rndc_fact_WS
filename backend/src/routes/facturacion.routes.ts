@@ -18,8 +18,7 @@ import {
 import { consultarRadicadoRemesa } from "../services/rndc/remesas.js";
 import { enviarFacturaRndc, parseFacturaXml } from "../services/rndc86/upload.js";
 import { autoMapear, parsearFacturas, validar, type Mapping, type FiltroGen } from "../services/excel/batchGenerar.js";
-import { actualizarCarga, importarCargas, insertCarga, listCargas } from "../db/queries/cargas.queries.js";
-import { cargaDesdeRndc } from "../services/rndc/importarCargas.js";
+import { actualizarCarga, insertCarga, listCargas } from "../db/queries/cargas.queries.js";
 import { puedeUsarPerfil } from "../db/queries/usuarioPerfiles.queries.js";
 
 export const facturacionRouter = Router();
@@ -275,32 +274,6 @@ facturacionRouter.get("/reporte-cargas", requireRole("admin"), async (req, res) 
   const hasta = req.query.hasta ? String(req.query.hasta) : undefined;
   const reporte = await listCargas({ perfilId, exito, desde, hasta });
   res.json(reporte);
-});
-
-// Recovers uploads the app didn't log (e.g. before the log existed) from the invoices the
-// RNDC has registered for an empresa. One empresa + a short date window per call, so each
-// request stays well inside the function time limit; the UI loops over windows.
-facturacionRouter.post("/reporte-cargas/importar-rndc", requireRole("admin"), async (req, res) => {
-  const perfilId = Number(req.body?.perfilId);
-  const desde = String(req.body?.desde ?? "");
-  const hasta = String(req.body?.hasta ?? "");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(desde) || !/^\d{4}-\d{2}-\d{2}$/.test(hasta)) {
-    return res.status(400).json({ error: "Fechas inválidas (usa AAAA-MM-DD)." });
-  }
-  const perfil = await loadPerfilOr404(req, perfilId).catch((e) => {
-    res.status(e.status ?? 500).json({ error: e.message });
-    return null;
-  });
-  if (!perfil) return;
-
-  const r = await consultarFacturasPorFecha(perfil, desde, hasta, 31);
-  if (!r.ok) {
-    // "No records" days come back as errors from the RNDC; that just means nothing to import.
-    return res.json({ encontradas: 0, nuevas: 0, aviso: r.error });
-  }
-  const cargas = r.data.map(cargaDesdeRndc).filter((c): c is NonNullable<typeof c> => c !== null);
-  const nuevas = await importarCargas(perfilId, cargas);
-  res.json({ encontradas: cargas.length, nuevas });
 });
 
 // ── Consultar factura / por remesa ───────────────────────────────────────────

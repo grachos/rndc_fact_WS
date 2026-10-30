@@ -56,10 +56,8 @@ export const cargaRndcReporteSchema = z.object({
   id: z.number().int(),
   perfilId: z.number().int(),
   perfilNombre: z.string(),
-  /** null for uploads imported from the RNDC: it doesn't record which app user sent them. */
-  usuarioId: z.number().int().nullable(),
+  usuarioId: z.number().int(),
   usuarioEmail: z.string(),
-  origen: z.enum(["app", "rndc"]),
   archivo: z.string(),
   numeroFactura: z.string(),
   exito: z.boolean(),
