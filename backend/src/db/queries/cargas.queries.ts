@@ -5,8 +5,9 @@ interface CargaRow {
   id: number;
   perfil_id: number;
   perfil_nombre: string;
-  usuario_id: number;
+  usuario_id: number | null;
   usuario_email: string;
+  origen: "app" | "rndc";
   archivo: string;
   numero_factura: string;
   exito: boolean;
@@ -22,6 +23,7 @@ function toReporte(row: CargaRow): CargaRndcReporte {
     perfilNombre: row.perfil_nombre,
     usuarioId: row.usuario_id,
     usuarioEmail: row.usuario_email,
+    origen: row.origen,
     archivo: row.archivo,
     numeroFactura: row.numero_factura,
     exito: row.exito,
@@ -29,6 +31,37 @@ function toReporte(row: CargaRow): CargaRndcReporte {
     remesas: row.remesas,
     createdAt: row.created_at.toISOString(),
   };
+}
+
+const USUARIO_IMPORTADA = `'Importada del RNDC (usuario no registrado)'`;
+
+export interface CargaImportada {
+  numeroFactura: string;
+  /** Local Colombia time "YYYY-MM-DD HH:MM:SS" of when it reached the RNDC, or null if unknown. */
+  fecha: string | null;
+  exito: boolean;
+  mensaje: string;
+  remesas: number;
+}
+
+/** Inserts invoices found in the RNDC that the app hasn't logged yet. Skips ones already
+ * imported and ones the app itself logged as a successful upload. Returns how many were new. */
+export async function importarCargas(perfilId: number, cargas: CargaImportada[]): Promise<number> {
+  let nuevas = 0;
+  for (const c of cargas) {
+    const { rowCount } = await pool.query(
+      `insert into cargas_rndc (perfil_id, usuario_id, origen, archivo, numero_factura, exito, mensaje, remesas, created_at)
+       select $1, null, 'rndc', '—', $2, $3, $4, $5,
+              coalesce($6::timestamp at time zone 'America/Bogota', now())
+       where not exists (
+         select 1 from cargas_rndc where perfil_id = $1 and numero_factura = $2 and origen = 'app' and exito
+       )
+       on conflict (perfil_id, numero_factura) where origen = 'rndc' do nothing`,
+      [perfilId, c.numeroFactura, c.exito, c.mensaje, c.remesas, c.fecha]
+    );
+    nuevas += rowCount ?? 0;
+  }
+  return nuevas;
 }
 
 export async function insertCarga(input: {
@@ -82,11 +115,12 @@ export async function listCargas(filtros: ListCargasFiltros): Promise<CargaRndcR
 
   const where = condiciones.length > 0 ? `where ${condiciones.join(" and ")}` : "";
   const { rows } = await pool.query<CargaRow>(
-    `select c.id, c.perfil_id, p.nombre as perfil_nombre, c.usuario_id, u.email as usuario_email,
+    `select c.id, c.perfil_id, p.nombre as perfil_nombre, c.usuario_id,
+            coalesce(u.email, ${USUARIO_IMPORTADA}) as usuario_email, c.origen,
             c.archivo, c.numero_factura, c.exito, c.mensaje, c.remesas, c.created_at
      from cargas_rndc c
      join perfiles p on p.id = c.perfil_id
-     join users u on u.id = c.usuario_id
+     left join users u on u.id = c.usuario_id
      ${where}
      order by c.created_at desc
      limit 5000`,

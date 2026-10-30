@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Download, RefreshCcw } from "lucide-react";
+import { Download, RefreshCcw, CloudDownload } from "lucide-react";
 import type { CargaRndcReporte, Perfil } from "@fe-tool/shared";
 import { api, ApiError } from "../../lib/api";
 
@@ -49,6 +49,121 @@ function descargarCsv(filas: CargaRndcReporte[]) {
   a.download = `reporte_cargas_rndc_${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function hoyColombia(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota" }).format(new Date());
+}
+
+function sumarDias(fecha: string, dias: number): string {
+  const d = new Date(`${fecha}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + dias);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Recovers past uploads the app didn't log, from the invoices the RNDC has registered. */
+function ImportarDelRndc({ perfiles, alTerminar }: { perfiles: Perfil[]; alTerminar: () => void }) {
+  const [abierto, setAbierto] = useState(false);
+  const [desde, setDesde] = useState(() => sumarDias(hoyColombia(), -30));
+  const [hasta, setHasta] = useState(hoyColombia);
+  const [corriendo, setCorriendo] = useState(false);
+  const [progreso, setProgreso] = useState("");
+  const [resumen, setResumen] = useState<{ encontradas: number; nuevas: number; avisos: string[] } | null>(null);
+
+  async function importar() {
+    setCorriendo(true);
+    setResumen(null);
+    const total = { encontradas: 0, nuevas: 0, avisos: [] as string[] };
+    try {
+      for (const p of perfiles) {
+        for (let ini = desde; ini <= hasta; ini = sumarDias(ini, 7)) {
+          const fin = sumarDias(ini, 6) < hasta ? sumarDias(ini, 6) : hasta;
+          setProgreso(`${p.nombre}: ${ini} a ${fin}…`);
+          try {
+            const r = await api.post<{ encontradas: number; nuevas: number; aviso?: string }>(
+              "/facturacion/reporte-cargas/importar-rndc",
+              { perfilId: p.id, desde: ini, hasta: fin }
+            );
+            total.encontradas += r.encontradas;
+            total.nuevas += r.nuevas;
+            // Days with no invoices come back as "no records" from the RNDC — not worth showing.
+            if (r.aviso && !/RNDC11|no\s+(se\s+)?encontr|no hay registros/i.test(r.aviso)) {
+              total.avisos.push(`${p.nombre} (${ini} a ${fin}): ${r.aviso}`);
+            }
+          } catch (err) {
+            total.avisos.push(`${p.nombre} (${ini} a ${fin}): ${err instanceof ApiError ? err.message : "error de conexión"}`);
+          }
+        }
+      }
+    } finally {
+      setResumen(total);
+      setProgreso("");
+      setCorriendo(false);
+      alTerminar();
+    }
+  }
+
+  if (!abierto) {
+    return (
+      <button
+        type="button"
+        onClick={() => setAbierto(true)}
+        className="flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+      >
+        <CloudDownload size={16} />
+        Importar del RNDC
+      </button>
+    );
+  }
+
+  return (
+    <section className="space-y-3 rounded-lg border border-sky-200 bg-sky-50 p-4 text-sm">
+      <p className="text-slate-700">
+        Trae al reporte las facturas que el RNDC tiene registradas para cada empresa en el rango de fechas de factura
+        (las que se enviaron antes de que el reporte las registrara). Quedan como{" "}
+        <strong>"Importada del RNDC"</strong>: el RNDC no guarda qué usuario de la aplicación las envió. No duplica
+        las que ya están en el reporte.
+      </p>
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="text-xs text-slate-600">
+          Desde (fecha de factura)
+          <input type="date" value={desde} max={hasta} onChange={(e) => setDesde(e.target.value)} className="mt-1 block rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
+        </label>
+        <label className="text-xs text-slate-600">
+          Hasta
+          <input type="date" value={hasta} min={desde} onChange={(e) => setHasta(e.target.value)} className="mt-1 block rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
+        </label>
+        <button
+          type="button"
+          disabled={corriendo || !desde || !hasta || perfiles.length === 0}
+          onClick={importar}
+          className="rounded-md bg-sky-700 px-3 py-1.5 font-medium text-white hover:bg-sky-800 disabled:opacity-50"
+        >
+          {corriendo ? "Importando…" : `Importar (${perfiles.length} empresa(s))`}
+        </button>
+        {!corriendo && (
+          <button type="button" onClick={() => setAbierto(false)} className="px-2 py-1.5 text-slate-500 hover:text-slate-700">
+            Cerrar
+          </button>
+        )}
+      </div>
+      {progreso && <p className="text-slate-600">Consultando {progreso}</p>}
+      {resumen && (
+        <div className="space-y-1">
+          <p className="font-medium text-slate-800">
+            {resumen.encontradas} factura(s) encontradas en el RNDC · {resumen.nuevas} nueva(s) agregadas al reporte.
+          </p>
+          {resumen.avisos.length > 0 && (
+            <ul className="list-disc pl-5 text-amber-800">
+              {resumen.avisos.map((a) => (
+                <li key={a}>{a}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </section>
+  );
 }
 
 export function ReporteCargas() {
@@ -125,6 +240,8 @@ export function ReporteCargas() {
         </button>
       </div>
       {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+
+      <ImportarDelRndc perfiles={perfiles} alTerminar={cargar} />
 
       <section className="grid grid-cols-2 gap-3 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-5">
         <label className="text-xs text-slate-600 sm:col-span-2">
