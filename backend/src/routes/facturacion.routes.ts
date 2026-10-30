@@ -18,7 +18,7 @@ import {
 import { consultarRadicadoRemesa } from "../services/rndc/remesas.js";
 import { enviarFacturaRndc, parseFacturaXml } from "../services/rndc86/upload.js";
 import { autoMapear, parsearFacturas, validar, type Mapping, type FiltroGen } from "../services/excel/batchGenerar.js";
-import { actualizarCarga, insertCarga, listCargas } from "../db/queries/cargas.queries.js";
+import { actualizarCarga, getCargaXml, insertCarga, listCargas } from "../db/queries/cargas.queries.js";
 import { puedeUsarPerfil } from "../db/queries/usuarioPerfiles.queries.js";
 
 export const facturacionRouter = Router();
@@ -228,6 +228,7 @@ facturacionRouter.post("/cargar-rndc/enviar", upload.array("archivos"), async (r
       archivo: f.nombre,
       numeroFactura: preview.nf,
       remesas: preview.remesas.length,
+      xml: f.contenido,
     };
     if (problemas.length > 0) {
       const mensaje = `No se envió al RNDC porque el XML tiene errores: ${problemas.join(" | ")}`;
@@ -274,6 +275,16 @@ facturacionRouter.get("/reporte-cargas", requireRole("admin"), async (req, res) 
   const hasta = req.query.hasta ? String(req.query.hasta) : undefined;
   const reporte = await listCargas({ perfilId, exito, desde, hasta });
   res.json(reporte);
+});
+
+// Evidence: the exact XML of an upload attempt, as it was sent (or blocked).
+facturacionRouter.get("/reporte-cargas/:id/xml", requireRole("admin"), async (req, res) => {
+  const carga = await getCargaXml(Number(req.params.id));
+  if (!carga) return res.status(404).json({ error: "Esta carga no tiene el XML guardado." });
+  const nombre = carga.archivo.replace(/[^\w.\-]/g, "_") || "factura.xml";
+  res.setHeader("Content-Type", "application/xml; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="${nombre}"`);
+  res.send(carga.xml);
 });
 
 // ── Consultar factura / por remesa ───────────────────────────────────────────

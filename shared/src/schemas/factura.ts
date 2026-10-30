@@ -63,6 +63,8 @@ export const cargaRndcReporteSchema = z.object({
   exito: z.boolean(),
   mensaje: z.string(),
   remesas: z.number().int(),
+  /** Whether the uploaded XML is stored as evidence (downloadable from the report). */
+  tieneXml: z.boolean(),
   createdAt: z.string(),
 });
 export type CargaRndcReporte = z.infer<typeof cargaRndcReporteSchema>;

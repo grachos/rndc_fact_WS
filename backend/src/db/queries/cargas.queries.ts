@@ -1,3 +1,4 @@
+import { gunzipSync, gzipSync } from "node:zlib";
 import type { CargaRndcReporte } from "@fe-tool/shared";
 import { pool } from "../pool.js";
 
@@ -12,6 +13,7 @@ interface CargaRow {
   exito: boolean;
   mensaje: string;
   remesas: number;
+  tiene_xml: boolean;
   created_at: Date;
 }
 
@@ -27,6 +29,7 @@ function toReporte(row: CargaRow): CargaRndcReporte {
     exito: row.exito,
     mensaje: row.mensaje,
     remesas: row.remesas,
+    tieneXml: row.tiene_xml,
     createdAt: row.created_at.toISOString(),
   };
 }
@@ -39,13 +42,34 @@ export async function insertCarga(input: {
   exito: boolean;
   mensaje: string;
   remesas: number;
+  /** The exact XML file that was sent (or blocked) — kept as evidence, gzip-compressed. */
+  xml: Buffer;
 }): Promise<number> {
   const { rows } = await pool.query<{ id: number }>(
-    `insert into cargas_rndc (perfil_id, usuario_id, archivo, numero_factura, exito, mensaje, remesas)
-     values ($1, $2, $3, $4, $5, $6, $7) returning id`,
-    [input.perfilId, input.usuarioId, input.archivo, input.numeroFactura, input.exito, input.mensaje, input.remesas]
+    `insert into cargas_rndc (perfil_id, usuario_id, archivo, numero_factura, exito, mensaje, remesas, xml_gz)
+     values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
+    [
+      input.perfilId,
+      input.usuarioId,
+      input.archivo,
+      input.numeroFactura,
+      input.exito,
+      input.mensaje,
+      input.remesas,
+      gzipSync(input.xml),
+    ]
   );
   return rows[0]!.id;
+}
+
+export async function getCargaXml(id: number): Promise<{ archivo: string; xml: Buffer } | null> {
+  const { rows } = await pool.query<{ archivo: string; xml_gz: Buffer | null }>(
+    "select archivo, xml_gz from cargas_rndc where id = $1",
+    [id]
+  );
+  const row = rows[0];
+  if (!row?.xml_gz) return null;
+  return { archivo: row.archivo, xml: gunzipSync(row.xml_gz) };
 }
 
 export async function actualizarCarga(id: number, resultado: { exito: boolean; mensaje: string }): Promise<void> {
@@ -83,7 +107,8 @@ export async function listCargas(filtros: ListCargasFiltros): Promise<CargaRndcR
   const where = condiciones.length > 0 ? `where ${condiciones.join(" and ")}` : "";
   const { rows } = await pool.query<CargaRow>(
     `select c.id, c.perfil_id, p.nombre as perfil_nombre, c.usuario_id, u.email as usuario_email,
-            c.archivo, c.numero_factura, c.exito, c.mensaje, c.remesas, c.created_at
+            c.archivo, c.numero_factura, c.exito, c.mensaje, c.remesas,
+            (c.xml_gz is not null) as tiene_xml, c.created_at
      from cargas_rndc c
      join perfiles p on p.id = c.perfil_id
      join users u on u.id = c.usuario_id

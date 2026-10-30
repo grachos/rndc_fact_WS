@@ -63,3 +63,15 @@ export async function apiUpload(path: string, form: FormData): Promise<Response>
   }
   return res;
 }
+
+/** Authenticated GET that returns the raw response (for file downloads). */
+export async function apiDescargar(path: string): Promise<Response> {
+  const token = useAuthStore.getState().token;
+  const res = await fetch(`/api${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (res.status === 401) useAuthStore.getState().logout();
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new ApiError(body?.error ?? `Error ${res.status}`, res.status, body);
+  }
+  return res;
+}

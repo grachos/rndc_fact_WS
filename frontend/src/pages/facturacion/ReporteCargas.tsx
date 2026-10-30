@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Download, RefreshCcw } from "lucide-react";
+import { Download, RefreshCcw, FileDown } from "lucide-react";
 import type { CargaRndcReporte, Perfil } from "@fe-tool/shared";
-import { api, ApiError } from "../../lib/api";
+import { api, apiDescargar, ApiError } from "../../lib/api";
 
 const ESTADOS = [
   { value: "", label: "Todos" },
@@ -49,6 +49,20 @@ function descargarCsv(filas: CargaRndcReporte[]) {
   a.download = `reporte_cargas_rndc_${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+async function descargarXml(f: CargaRndcReporte, alFallar: (msg: string) => void) {
+  try {
+    const res = await apiDescargar(`/facturacion/reporte-cargas/${f.id}/xml`);
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = f.archivo || `FACTURA_${f.numeroFactura}.xml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    alFallar(err instanceof ApiError ? err.message : "No se pudo descargar el XML");
+  }
 }
 
 export function ReporteCargas() {
@@ -253,6 +267,7 @@ export function ReporteCargas() {
               <th className="px-3 py-2">Estado</th>
               <th className="px-3 py-2">Respuesta WS (RNDC)</th>
               <th className="px-3 py-2">Remesas</th>
+              <th className="px-3 py-2">XML</th>
             </tr>
           </thead>
           <tbody>
@@ -276,11 +291,25 @@ export function ReporteCargas() {
                 </td>
                 <td className="max-w-md px-3 py-2 text-slate-600">{f.mensaje}</td>
                 <td className="px-3 py-2">{f.remesas}</td>
+                <td className="px-3 py-2">
+                  {f.tieneXml ? (
+                    <button
+                      type="button"
+                      title="Descargar el XML exacto que se envió"
+                      onClick={() => descargarXml(f, setError)}
+                      className="rounded p-1 text-slate-500 hover:bg-slate-100"
+                    >
+                      <FileDown size={15} />
+                    </button>
+                  ) : (
+                    <span className="text-xs text-slate-300">—</span>
+                  )}
+                </td>
               </tr>
             ))}
             {filas.length === 0 && !loading && (
               <tr>
-                <td colSpan={8} className="px-3 py-6 text-center text-slate-400">
+                <td colSpan={9} className="px-3 py-6 text-center text-slate-400">
                   Sin cargas registradas para estos filtros.
                 </td>
               </tr>
