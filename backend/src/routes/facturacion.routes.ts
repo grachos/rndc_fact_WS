@@ -18,7 +18,14 @@ import {
 import { consultarRadicadoRemesa } from "../services/rndc/remesas.js";
 import { enviarFacturaRndc, parseFacturaXml } from "../services/rndc86/upload.js";
 import { autoMapear, parsearFacturas, validar, type Mapping, type FiltroGen } from "../services/excel/batchGenerar.js";
-import { actualizarCarga, getCargaXml, insertCarga, listCargas } from "../db/queries/cargas.queries.js";
+import {
+  actualizarCarga,
+  getCargaXml,
+  getGeneradaXml,
+  insertCarga,
+  insertGenerada,
+  listCargas,
+} from "../db/queries/cargas.queries.js";
 import { puedeUsarPerfil } from "../db/queries/usuarioPerfiles.queries.js";
 
 export const facturacionRouter = Router();
@@ -49,6 +56,15 @@ facturacionRouter.post("/generar-xml", async (req, res) => {
   }
   try {
     const result = await generarFacturaDesdeTemplate(parsed.data);
+    await insertGenerada({
+      perfilId: parsed.data.perfilId,
+      usuarioId: req.user!.sub,
+      numeroFactura: parsed.data.numeroFactura,
+      origen: "manual",
+      archivo: result.filename,
+      remesas: parsed.data.remesas.length,
+      xml: result.xml,
+    });
     res.json(result);
   } catch (err) {
     if (err instanceof SinPlantillaError || err instanceof PlantillaSinLineaRemesaError) {
@@ -116,6 +132,7 @@ facturacionRouter.post("/excel/generar", upload.single("archivo"), async (req, r
   const facturas = parsearFacturas(rows, mapping, filtro, nitCliFijo, digCliFijo, nomCliFijo);
 
   const zip = new JSZip();
+  const generadasXml: { numeroFactura: string; remesas: number; xml: string }[] = [];
   const resumen: { numeroFactura: string; ok: boolean; error?: string; avisos?: string[] }[] = [];
 
   for (const factura of facturas) {
@@ -143,6 +160,7 @@ facturacionRouter.post("/excel/generar", upload.single("archivo"), async (req, r
       });
       const { xml, avisos } = generarFacturaConTemplate(template.contenido, datos);
       zip.file(`FACTURA_${factura.numeroFactura}.xml`, xml);
+      generadasXml.push({ numeroFactura: factura.numeroFactura, remesas: datos.remesas.length, xml });
       resumen.push({ numeroFactura: factura.numeroFactura, ok: true, avisos });
     } catch (err: any) {
       resumen.push({ numeroFactura: factura.numeroFactura, ok: false, error: String(err?.message ?? err) });
@@ -157,6 +175,18 @@ facturacionRouter.post("/excel/generar", upload.single("archivo"), async (req, r
     return res.status(400).json({
       error: `No se generó ninguna factura: las ${rechazadas.length} tienen errores.`,
       rechazadas,
+    });
+  }
+
+  for (const g of generadasXml) {
+    await insertGenerada({
+      perfilId,
+      usuarioId: req.user!.sub,
+      numeroFactura: g.numeroFactura,
+      origen: "excel",
+      archivo: `FACTURA_${g.numeroFactura}.xml`,
+      remesas: g.remesas,
+      xml: g.xml,
     });
   }
 
@@ -269,18 +299,21 @@ facturacionRouter.post("/cargar-rndc/enviar", upload.array("archivos"), async (r
 
 facturacionRouter.get("/reporte-cargas", requireRole("admin"), async (req, res) => {
   const perfilId = req.query.perfilId ? Number(req.query.perfilId) : undefined;
-  const exito =
-    req.query.exito === "true" ? true : req.query.exito === "false" ? false : undefined;
+  const estado = ["exitosa", "fallida", "sin_subir"].includes(String(req.query.estado))
+    ? (String(req.query.estado) as "exitosa" | "fallida" | "sin_subir")
+    : undefined;
   const desde = req.query.desde ? String(req.query.desde) : undefined;
   const hasta = req.query.hasta ? String(req.query.hasta) : undefined;
-  const reporte = await listCargas({ perfilId, exito, desde, hasta });
+  const reporte = await listCargas({ perfilId, estado, desde, hasta });
   res.json(reporte);
 });
 
-// Evidence: the exact XML of an upload attempt, as it was sent (or blocked).
+// Evidence: the exact XML of an upload attempt as it was sent (or blocked), or of a
+// generated invoice (?fuente=generada).
 facturacionRouter.get("/reporte-cargas/:id/xml", requireRole("admin"), async (req, res) => {
-  const carga = await getCargaXml(Number(req.params.id));
-  if (!carga) return res.status(404).json({ error: "Esta carga no tiene el XML guardado." });
+  const id = Number(req.params.id);
+  const carga = req.query.fuente === "generada" ? await getGeneradaXml(id) : await getCargaXml(id);
+  if (!carga) return res.status(404).json({ error: "Este registro no tiene el XML guardado." });
   const nombre = carga.archivo.replace(/[^\w.\-]/g, "_") || "factura.xml";
   res.setHeader("Content-Type", "application/xml; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="${nombre}"`);

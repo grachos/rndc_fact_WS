@@ -50,10 +50,20 @@ export const cargarRndcResultadoSchema = z.object({
 });
 export type CargarRndcResultado = z.infer<typeof cargarRndcResultadoSchema>;
 
-/** One row of the "Reporte de cargas RNDC" — a persisted record of a past
- * `/cargar-rndc/enviar` upload attempt, for the interactive report + CSV export. */
+/** Status of an invoice in the report: uploaded OK, rejected/blocked by the RNDC, or
+ * generated in the app but never uploaded. */
+export const estadoFacturaSchema = z.enum(["exitosa", "fallida", "sin_subir"]);
+export type EstadoFactura = z.infer<typeof estadoFacturaSchema>;
+
+/** One row of the "Reporte de cargas RNDC": either an upload attempt (`fuente: "carga"`)
+ * or a generated invoice that was never uploaded (`fuente: "generada"`). */
 export const cargaRndcReporteSchema = z.object({
   id: z.number().int(),
+  /** Which table the row (and its XML) comes from. */
+  fuente: z.enum(["carga", "generada"]),
+  estado: estadoFacturaSchema,
+  /** How the invoice was generated in the app, if it was ("manual" | "excel"); null = uploaded file from outside. */
+  origen: z.enum(["manual", "excel"]).nullable(),
   perfilId: z.number().int(),
   perfilNombre: z.string(),
   usuarioId: z.number().int(),
