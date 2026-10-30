@@ -6,22 +6,32 @@ import { api, ApiError } from "../../lib/api";
 import { parseMonto } from "../../lib/numeros";
 import { usePerfilStore } from "../../store/perfilStore";
 
-function nuevaRemesa(): RemesaLinea {
-  return { consecutivo: "", radicado: "", peso: "1", valor: 0, descripcionLinea: "Servicio de transporte" };
+function hoy(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/** A remesa row with a stable identity, so each input stays tied to its own row
+ * when rows are removed or the whole form is cleared. */
+type FilaRemesa = RemesaLinea & { _id: number };
+let siguienteId = 1;
+
+function nuevaRemesa(): FilaRemesa {
+  return { _id: siguienteId++, consecutivo: "", radicado: "", peso: "1", valor: 0, descripcionLinea: "Servicio de transporte" };
 }
 
 export function GenerarXml() {
   const { perfilActivoId } = usePerfilStore();
   const [numeroFactura, setNumeroFactura] = useState("");
   const [cufe, setCufe] = useState("");
-  const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10));
+  const [fecha, setFecha] = useState(hoy);
   const [nitCliente, setNitCliente] = useState("");
   const [digitoCliente, setDigitoCliente] = useState("");
   const [nombreCliente, setNombreCliente] = useState("");
   const [valorTotal, setValorTotal] = useState("");
-  const [remesas, setRemesas] = useState<RemesaLinea[]>([nuevaRemesa()]);
+  const [remesas, setRemesas] = useState<FilaRemesa[]>(() => [nuevaRemesa()]);
   const [error, setError] = useState<string | null>(null);
   const [avisos, setAvisos] = useState<string[]>([]);
+  const [generada, setGenerada] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [consultando, setConsultando] = useState<number | null>(null);
 
@@ -54,6 +64,7 @@ export function GenerarXml() {
     }
     setError(null);
     setAvisos([]);
+    setGenerada(null);
     setSaving(true);
     try {
       const input: GenerarXmlInput = {
@@ -65,7 +76,7 @@ export function GenerarXml() {
         digitoCliente,
         nombreCliente,
         valorTotal: parseMonto(valorTotal),
-        remesas,
+        remesas: remesas.map(({ _id, ...r }) => r),
       };
       const result = await api.post<GenerarXmlResult>("/facturacion/generar-xml", input);
       setAvisos(result.avisos);
@@ -76,6 +87,17 @@ export function GenerarXml() {
       a.download = result.filename;
       a.click();
       URL.revokeObjectURL(url);
+      // Start the next invoice from a blank form so no data carries over by mistake.
+      // (On error the data stays, so the operator can fix it.)
+      setGenerada(numeroFactura);
+      setNumeroFactura("");
+      setCufe("");
+      setFecha(hoy());
+      setNitCliente("");
+      setDigitoCliente("");
+      setNombreCliente("");
+      setValorTotal("");
+      setRemesas([nuevaRemesa()]);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo generar el XML");
     } finally {
@@ -87,6 +109,11 @@ export function GenerarXml() {
     <form onSubmit={onSubmit} className="max-w-3xl space-y-6">
       <h2 className="text-lg font-semibold text-slate-800">Generar XML</h2>
       {error && <p className="whitespace-pre-line rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {generada && (
+        <p className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-800">
+          Factura {generada} generada y descargada. El formulario quedó limpio para la siguiente.
+        </p>
+      )}
       {avisos.length > 0 && (
         <div className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700">
           {avisos.map((a, i) => (
@@ -145,7 +172,7 @@ export function GenerarXml() {
         </div>
         <div className="space-y-3">
           {remesas.map((r, idx) => (
-            <div key={idx} className="grid grid-cols-6 items-end gap-2 rounded-md border border-slate-100 p-2">
+            <div key={r._id} className="grid grid-cols-6 items-end gap-2 rounded-md border border-slate-100 p-2">
               <label className="text-xs text-slate-500">
                 Consecutivo
                 <input required value={r.consecutivo} onChange={(e) => setRemesa(idx, { consecutivo: e.target.value })} className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm" />
