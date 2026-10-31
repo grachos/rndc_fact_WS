@@ -17,12 +17,12 @@ export type RemesaLinea = z.infer<typeof remesaLineaSchema>;
  */
 export const generarXmlInputSchema = z.object({
   perfilId: z.number().int(),
-  numeroFactura: z.string().min(1),
-  cufe: z.string().min(1),
+  numeroFactura: z.string().trim().min(1),
+  cufe: z.string().trim().min(1),
   fecha: z.string().min(1), // YYYY-MM-DD
-  nitCliente: z.string().min(1),
-  digitoCliente: z.string().min(1),
-  nombreCliente: z.string().min(1),
+  nitCliente: z.string().trim().min(1),
+  digitoCliente: z.string().trim().min(1),
+  nombreCliente: z.string().trim().min(1),
   valorTotal: z.number(),
   remesas: z.array(remesaLineaSchema).min(1),
 });
