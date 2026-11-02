@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Download, RefreshCcw, FileDown } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, FileDown, FileSpreadsheet, RefreshCcw } from "lucide-react";
 import type { CargaRndcReporte, Perfil } from "@fe-tool/shared";
 import { api, apiDescargar, ApiError } from "../../lib/api";
 
@@ -66,6 +66,8 @@ function descargarCsv(filas: CargaRndcReporte[]) {
   URL.revokeObjectURL(url);
 }
 
+const POR_PAGINA = 25;
+
 async function descargarXml(f: CargaRndcReporte, alFallar: (msg: string) => void) {
   try {
     const res = await apiDescargar(`/facturacion/reporte-cargas/${f.id}/xml${f.fuente === "generada" ? "?fuente=generada" : ""}`);
@@ -90,6 +92,36 @@ export function ReporteCargas() {
   const [estado, setEstado] = useState("");
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
+  const [pagina, setPagina] = useState(1);
+  const [descargandoExcel, setDescargandoExcel] = useState(false);
+
+  function queryString() {
+    const params = new URLSearchParams();
+    if (perfilId) params.set("perfilId", perfilId);
+    if (estado) params.set("estado", estado);
+    if (desde) params.set("desde", desde);
+    if (hasta) params.set("hasta", hasta);
+    const qs = params.toString();
+    return qs ? `?${qs}` : "";
+  }
+
+  async function descargarExcel() {
+    setDescargandoExcel(true);
+    try {
+      const res = await apiDescargar(`/facturacion/reporte-cargas/excel${queryString()}`);
+      const nombre = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? "reporte_facturas.xlsx";
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = nombre;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo descargar el Excel");
+    } finally {
+      setDescargandoExcel(false);
+    }
+  }
 
   useEffect(() => {
     api.get<Perfil[]>("/perfiles").then(setPerfiles).catch(() => {});
@@ -99,14 +131,9 @@ export function ReporteCargas() {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams();
-      if (perfilId) params.set("perfilId", perfilId);
-      if (estado) params.set("estado", estado);
-      if (desde) params.set("desde", desde);
-      if (hasta) params.set("hasta", hasta);
-      const qs = params.toString();
-      const data = await api.get<CargaRndcReporte[]>(`/facturacion/reporte-cargas${qs ? `?${qs}` : ""}`);
+      const data = await api.get<CargaRndcReporte[]>(`/facturacion/reporte-cargas${queryString()}`);
       setFilas(data);
+      setPagina(1);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo cargar el reporte");
     } finally {
@@ -127,6 +154,10 @@ export function ReporteCargas() {
     const tasa = total > 0 ? Math.round((exitosas / total) * 100) : 0;
     return { total, exitosas, fallidas, sinSubir, tasa };
   }, [filas]);
+
+  const totalPaginas = Math.max(1, Math.ceil(filas.length / POR_PAGINA));
+  const paginaActual = Math.min(pagina, totalPaginas);
+  const filasPagina = filas.slice((paginaActual - 1) * POR_PAGINA, paginaActual * POR_PAGINA);
 
   const porUsuario = useMemo(() => {
     const mapa = new Map<
@@ -155,17 +186,28 @@ export function ReporteCargas() {
 
   return (
     <div className="max-w-6xl space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-lg font-semibold text-slate-800">Reporte de facturas (generadas y cargadas a RNDC)</h2>
-        <button
-          type="button"
-          disabled={filas.length === 0}
-          onClick={() => descargarCsv(filas)}
-          className="flex items-center gap-1.5 rounded-md bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-900 disabled:opacity-50"
-        >
-          <Download size={16} />
-          Descargar CSV
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={filas.length === 0 || descargandoExcel}
+            onClick={descargarExcel}
+            className="flex items-center gap-1.5 rounded-md bg-green-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-800 disabled:opacity-50"
+          >
+            <FileSpreadsheet size={16} />
+            {descargandoExcel ? "Generando…" : "Descargar Excel"}
+          </button>
+          <button
+            type="button"
+            disabled={filas.length === 0}
+            onClick={() => descargarCsv(filas)}
+            className="flex items-center gap-1.5 rounded-md bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-900 disabled:opacity-50"
+          >
+            <Download size={16} />
+            CSV
+          </button>
+        </div>
       </div>
       {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
@@ -307,7 +349,7 @@ export function ReporteCargas() {
             </tr>
           </thead>
           <tbody>
-            {filas.map((f) => (
+            {filasPagina.map((f) => (
               <tr key={`${f.fuente}-${f.id}`} className="border-t border-slate-100 align-top">
                 <td className="whitespace-nowrap px-3 py-2 text-slate-500">
                   {new Date(f.createdAt).toLocaleString("es-CO")}
@@ -350,6 +392,36 @@ export function ReporteCargas() {
           </tbody>
         </table>
       </section>
+
+      {filas.length > POR_PAGINA && (
+        <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-600">
+          <span>
+            Mostrando {(paginaActual - 1) * POR_PAGINA + 1}–{Math.min(paginaActual * POR_PAGINA, filas.length)} de{" "}
+            {filas.length}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={paginaActual <= 1}
+              onClick={() => setPagina(paginaActual - 1)}
+              className="flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 hover:bg-slate-50 disabled:opacity-40"
+            >
+              <ChevronLeft size={14} /> Anterior
+            </button>
+            <span>
+              Página {paginaActual} de {totalPaginas}
+            </span>
+            <button
+              type="button"
+              disabled={paginaActual >= totalPaginas}
+              onClick={() => setPagina(paginaActual + 1)}
+              className="flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 hover:bg-slate-50 disabled:opacity-40"
+            >
+              Siguiente <ChevronRight size={14} />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

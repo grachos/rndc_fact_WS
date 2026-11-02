@@ -297,15 +297,78 @@ facturacionRouter.post("/cargar-rndc/enviar", upload.array("archivos"), async (r
 
 // ── Reporte de cargas RNDC ───────────────────────────────────────────────────
 
-facturacionRouter.get("/reporte-cargas", requireRole("admin"), async (req, res) => {
-  const perfilId = req.query.perfilId ? Number(req.query.perfilId) : undefined;
+function filtrosReporte(req: Request) {
   const estado = ["exitosa", "fallida", "sin_subir"].includes(String(req.query.estado))
     ? (String(req.query.estado) as "exitosa" | "fallida" | "sin_subir")
     : undefined;
-  const desde = req.query.desde ? String(req.query.desde) : undefined;
-  const hasta = req.query.hasta ? String(req.query.hasta) : undefined;
-  const reporte = await listCargas({ perfilId, estado, desde, hasta });
-  res.json(reporte);
+  return {
+    perfilId: req.query.perfilId ? Number(req.query.perfilId) : undefined,
+    estado,
+    desde: req.query.desde ? String(req.query.desde) : undefined,
+    hasta: req.query.hasta ? String(req.query.hasta) : undefined,
+  };
+}
+
+facturacionRouter.get("/reporte-cargas", requireRole("admin"), async (req, res) => {
+  res.json(await listCargas(filtrosReporte(req)));
+});
+
+const ESTADO_TXT = { exitosa: "Exitosa", fallida: "Fallida", sin_subir: "Generada, sin subir" } as const;
+const ORIGEN_TXT = { manual: "Manual", excel: "Excel" } as const;
+
+// The report (same filters as the screen) as an Excel file: invoice rows + per-user summary.
+facturacionRouter.get("/reporte-cargas/excel", requireRole("admin"), async (req, res) => {
+  const filas = await listCargas(filtrosReporte(req));
+
+  const detalle = filas.map((f) => ({
+    Fecha: new Date(f.createdAt).toLocaleString("es-CO", { timeZone: "America/Bogota" }),
+    Empresa: f.perfilNombre,
+    Usuario: f.usuarioEmail,
+    Archivo: f.archivo,
+    "N° Factura": f.numeroFactura,
+    Origen: f.origen ? ORIGEN_TXT[f.origen] : "Archivo externo",
+    Estado: ESTADO_TXT[f.estado],
+    "Respuesta WS (RNDC)": f.mensaje,
+    Remesas: f.remesas,
+  }));
+
+  const porUsuario = new Map<string, { exitosas: number; fallidas: number; sinSubir: number }>();
+  for (const f of filas) {
+    const u = porUsuario.get(f.usuarioEmail) ?? { exitosas: 0, fallidas: 0, sinSubir: 0 };
+    if (f.estado === "exitosa") u.exitosas += 1;
+    else if (f.estado === "fallida") u.fallidas += 1;
+    else u.sinSubir += 1;
+    porUsuario.set(f.usuarioEmail, u);
+  }
+  const resumen = [...porUsuario.entries()].map(([usuario, u]) => {
+    const cargadas = u.exitosas + u.fallidas;
+    return {
+      Usuario: usuario,
+      "Facturas cargadas": cargadas,
+      Exitosas: u.exitosas,
+      Fallidas: u.fallidas,
+      "Generadas sin subir": u.sinSubir,
+      "Tasa de éxito": cargadas > 0 ? `${Math.round((u.exitosas / cargadas) * 100)}%` : "0%",
+    };
+  });
+
+  const wb = XLSX.utils.book_new();
+  const hojaDetalle = XLSX.utils.json_to_sheet(detalle, {
+    header: ["Fecha", "Empresa", "Usuario", "Archivo", "N° Factura", "Origen", "Estado", "Respuesta WS (RNDC)", "Remesas"],
+  });
+  hojaDetalle["!cols"] = [20, 22, 28, 24, 14, 14, 20, 70, 9].map((wch) => ({ wch }));
+  hojaDetalle["!autofilter"] = { ref: hojaDetalle["!ref"] ?? "A1:I1" };
+  XLSX.utils.book_append_sheet(wb, hojaDetalle, "Facturas");
+  const hojaResumen = XLSX.utils.json_to_sheet(resumen, {
+    header: ["Usuario", "Facturas cargadas", "Exitosas", "Fallidas", "Generadas sin subir", "Tasa de éxito"],
+  });
+  hojaResumen["!cols"] = [30, 16, 10, 10, 18, 12].map((wch) => ({ wch }));
+  XLSX.utils.book_append_sheet(wb, hojaResumen, "Por usuario");
+
+  const fecha = new Date().toLocaleDateString("en-CA", { timeZone: "America/Bogota" });
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="reporte_facturas_${fecha}.xlsx"`);
+  res.send(XLSX.write(wb, { type: "buffer", bookType: "xlsx" }));
 });
 
 // Evidence: the exact XML of an upload attempt as it was sent (or blocked), or of a
