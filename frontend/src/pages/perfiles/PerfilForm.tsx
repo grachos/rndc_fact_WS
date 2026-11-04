@@ -107,6 +107,10 @@ function Field({
     <label className="block text-sm font-medium text-slate-700">
       {label}
       <input
+        // These hold RNDC credentials, not the app login: stop the browser from filling in the
+        // saved login email/password (that made the RNDC reject uploads with "No se puede atender
+        // la solicitud del usuario: <login email>").
+        autoComplete={props.type === "password" ? "new-password" : "off"}
         {...props}
         className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
       />
