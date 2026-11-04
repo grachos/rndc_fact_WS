@@ -93,6 +93,8 @@ const empty: PerfilInput = {
   nitMonitoreo: "",
   rndcUsuario: "",
   rndcPassword: "",
+  rndcUsuarioFacturacion: "",
+  rndcPasswordFacturacion: "",
   rndcUsuarioCorregir: "",
   rndcPasswordCorregir: "",
   rndcUsuarioMonitoreo: "",
@@ -141,6 +143,8 @@ export function PerfilForm() {
         nitMonitoreo: p.nitMonitoreo ?? "",
         rndcUsuario: p.rndcUsuario,
         rndcPassword: "",
+        rndcUsuarioFacturacion: p.rndcUsuarioFacturacion ?? "",
+        rndcPasswordFacturacion: "",
         rndcUsuarioCorregir: p.rndcUsuarioCorregir ?? "",
         rndcPasswordCorregir: "",
         rndcUsuarioMonitoreo: p.rndcUsuarioMonitoreo ?? "",
@@ -241,6 +245,22 @@ export function PerfilForm() {
               required={!isEdit}
               value={form.rndcPassword ?? ""}
               onChange={(e) => set("rndcPassword", e.target.value)}
+            />
+          </div>
+        </section>
+
+        <section className="rounded-lg border border-slate-200 bg-white p-4">
+          <h3 className="mb-1 text-sm font-semibold text-slate-600">Credenciales de facturación (subir facturas al RNDC)</h3>
+          <p className="mb-2 text-xs text-slate-500">
+            Se usan para cargar las facturas (proceso 86). Si se dejan vacías se usan las credenciales normales.
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Usuario facturación" value={form.rndcUsuarioFacturacion ?? ""} onChange={(e) => set("rndcUsuarioFacturacion", e.target.value)} />
+            <Field
+              label={perfil?.hasFacturacionCredenciales ? "Contraseña facturación (dejar en blanco para no cambiar)" : "Contraseña facturación"}
+              type="password"
+              value={form.rndcPasswordFacturacion ?? ""}
+              onChange={(e) => set("rndcPasswordFacturacion", e.target.value)}
             />
           </div>
         </section>

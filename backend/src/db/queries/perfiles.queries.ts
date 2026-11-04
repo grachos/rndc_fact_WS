@@ -10,6 +10,8 @@ interface PerfilRow {
   nit_monitoreo: string | null;
   rndc_usuario: string;
   rndc_password_enc: string;
+  rndc_usuario_facturacion: string | null;
+  rndc_password_facturacion_enc: string | null;
   rndc_usuario_corregir: string | null;
   rndc_password_corregir_enc: string | null;
   rndc_usuario_monitoreo: string | null;
@@ -28,6 +30,9 @@ export interface PerfilCredenciales {
   nitMonitoreo: string | null;
   rndcUsuario: string;
   rndcPassword: string;
+  /** Credentials for uploading invoices (proceso 86); null → use the normal ones. */
+  rndcUsuarioFacturacion: string | null;
+  rndcPasswordFacturacion: string | null;
   rndcUsuarioCorregir: string | null;
   rndcPasswordCorregir: string | null;
   rndcUsuarioMonitoreo: string | null;
@@ -43,6 +48,8 @@ function toPerfil(row: PerfilRow): Perfil {
     nitMonitoreo: row.nit_monitoreo,
     rndcUsuario: row.rndc_usuario,
     hasRndcCredenciales: Boolean(row.rndc_password_enc),
+    rndcUsuarioFacturacion: row.rndc_usuario_facturacion,
+    hasFacturacionCredenciales: Boolean(row.rndc_password_facturacion_enc),
     rndcUsuarioCorregir: row.rndc_usuario_corregir,
     hasCorregirCredenciales: Boolean(row.rndc_password_corregir_enc),
     rndcUsuarioMonitoreo: row.rndc_usuario_monitoreo,
@@ -55,7 +62,8 @@ function toPerfil(row: PerfilRow): Perfil {
 }
 
 const SELECT_COLUMNS = `id, nombre, nit_socio, prefijo_remesa, nit_monitoreo,
-  rndc_usuario, rndc_password_enc, rndc_usuario_corregir, rndc_password_corregir_enc,
+  rndc_usuario, rndc_password_enc, rndc_usuario_facturacion, rndc_password_facturacion_enc,
+  rndc_usuario_corregir, rndc_password_corregir_enc,
   rndc_usuario_monitoreo, rndc_password_monitoreo_enc,
   xml_template, xml_template_nombre, created_at, updated_at`;
 
@@ -81,6 +89,10 @@ export async function getPerfilCredenciales(id: number): Promise<PerfilCredencia
     nitMonitoreo: row.nit_monitoreo,
     rndcUsuario: row.rndc_usuario,
     rndcPassword: decryptSecret(row.rndc_password_enc),
+    rndcUsuarioFacturacion: row.rndc_usuario_facturacion,
+    rndcPasswordFacturacion: row.rndc_password_facturacion_enc
+      ? decryptSecret(row.rndc_password_facturacion_enc)
+      : null,
     rndcUsuarioCorregir: row.rndc_usuario_corregir,
     rndcPasswordCorregir: row.rndc_password_corregir_enc ? decryptSecret(row.rndc_password_corregir_enc) : null,
     rndcUsuarioMonitoreo: row.rndc_usuario_monitoreo,
@@ -127,8 +139,9 @@ export async function createPerfil(input: PerfilInput): Promise<Perfil> {
        nombre, nit_socio, prefijo_remesa, nit_monitoreo,
        rndc_usuario, rndc_password_enc,
        rndc_usuario_corregir, rndc_password_corregir_enc,
-       rndc_usuario_monitoreo, rndc_password_monitoreo_enc
-     ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       rndc_usuario_monitoreo, rndc_password_monitoreo_enc,
+       rndc_usuario_facturacion, rndc_password_facturacion_enc
+     ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
      returning ${SELECT_COLUMNS}`,
     [
       input.nombre,
@@ -141,6 +154,8 @@ export async function createPerfil(input: PerfilInput): Promise<Perfil> {
       input.rndcPasswordCorregir ? encryptSecret(input.rndcPasswordCorregir) : null,
       input.rndcUsuarioMonitoreo || null,
       input.rndcPasswordMonitoreo ? encryptSecret(input.rndcPasswordMonitoreo) : null,
+      input.rndcUsuarioFacturacion || null,
+      input.rndcPasswordFacturacion ? encryptSecret(input.rndcPasswordFacturacion) : null,
     ]
   );
   return toPerfil(rows[0]!);
@@ -156,6 +171,8 @@ export async function updatePerfil(id: number, input: PerfilInput): Promise<Perf
        rndc_password_corregir_enc = coalesce($9, rndc_password_corregir_enc),
        rndc_usuario_monitoreo = $10,
        rndc_password_monitoreo_enc = coalesce($11, rndc_password_monitoreo_enc),
+       rndc_usuario_facturacion = $12,
+       rndc_password_facturacion_enc = coalesce($13, rndc_password_facturacion_enc),
        updated_at = now()
      where id = $1
      returning ${SELECT_COLUMNS}`,
@@ -171,6 +188,8 @@ export async function updatePerfil(id: number, input: PerfilInput): Promise<Perf
       input.rndcPasswordCorregir ? encryptSecret(input.rndcPasswordCorregir) : null,
       input.rndcUsuarioMonitoreo || null,
       input.rndcPasswordMonitoreo ? encryptSecret(input.rndcPasswordMonitoreo) : null,
+      input.rndcUsuarioFacturacion || null,
+      input.rndcPasswordFacturacion ? encryptSecret(input.rndcPasswordFacturacion) : null,
     ]
   );
   return rows[0] ? toPerfil(rows[0]) : null;

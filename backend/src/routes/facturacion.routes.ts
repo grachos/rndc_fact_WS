@@ -279,7 +279,14 @@ facturacionRouter.post("/cargar-rndc/enviar", upload.array("archivos"), async (r
       exito: false,
       mensaje: "Sin respuesta del RNDC: el envío se interrumpió antes de recibir respuesta. Consulta la factura en el RNDC antes de reenviarla.",
     });
-    const envio = await enviarFacturaRndc(f.contenido, perfil.rndcUsuario, perfil.rndcPassword, perfil.nitSocio);
+    // Uploading uses the empresa's billing credentials when set, else its normal ones.
+    const usaFacturacion = Boolean(perfil.rndcUsuarioFacturacion && perfil.rndcPasswordFacturacion);
+    const envio = await enviarFacturaRndc(
+      f.contenido,
+      usaFacturacion ? perfil.rndcUsuarioFacturacion! : perfil.rndcUsuario,
+      usaFacturacion ? perfil.rndcPasswordFacturacion! : perfil.rndcPassword,
+      perfil.nitSocio
+    );
     await actualizarCarga(cargaId, { exito: envio.exito, mensaje: envio.mensaje });
     resultados.push({
       archivo: f.nombre,
